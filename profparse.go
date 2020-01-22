@@ -95,15 +95,17 @@ func main() {
 */
 
 
-func CombineBVs(vectors [][]bool) ([]bool, error) {
+func CombineBVs(vectors [][]bool) ([]bool, int,  error) {
 	bv := make([]bool, 5667885)
 
 	// First check and make sure all have the proper length
 	for _, v := range vectors {
 		if v != nil && len(v) != 5667885 {
-			return nil, errors.New("improper length bv for combining")
+			return nil, 0, errors.New("improper length bv for combining")
 		}
 	}
+
+	totalBlocks := 0
 
 	for i := range bv {
 		bv[i] = false
@@ -113,11 +115,13 @@ func CombineBVs(vectors [][]bool) ([]bool, error) {
 			}
 			if vectors[j][i] {
 				bv[i] = true
+				totalBlocks += 1
+				break
 			}
 		}
 	}
 
-	return bv, nil
+	return bv, totalBlocks, nil
 
 
 }
@@ -153,7 +157,7 @@ func WriteFile(fName string, bv []bool) error {
 		return err
 	}
 
-	log.Info("Wrote %d bytes to file %s", numBytes, fName)
+	log.Infof("Wrote %d bytes to file %s", numBytes, fName)
 	if numBytes != 708486 {
 		log.Warnf("Warning: Wrote unexpected number of bytes (708486 expected, %d written)", numBytes)
 	}
@@ -183,7 +187,7 @@ func bytesToBools(b []byte) []bool {
 	return t[:len(t) - 3]
 }
 
-func ParseFile(fName string, mapping *map[string]int) ([]bool, error) {
+func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
 	f, err := os.Open(fName)
 	if err != nil {
 		log.Error(err)
@@ -199,8 +203,13 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, error) {
 	checker := make(map[int]bool)
 	goodFile := false
 
+	lineNum := 0
+
+	blocksCovered := 0
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
+		lineNum += 1
 		if strings.HasPrefix(line, "Instrumentation level") {
 			goodFile = true
 			break
@@ -225,6 +234,9 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, error) {
 				}
 
 				bv[currentIndex + 1 + bIndex] = bVal != 0
+				if bVal != 0 {
+					blocksCovered += 1
+				}
 				checker[currentIndex + 1 + bIndex] = true
 			}
 
@@ -241,16 +253,21 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, error) {
 			}
 
 			bv[currentIndex] = fCount != 0
+			if fCount != 0 {
+				blocksCovered += 1
+			}
 			checker[currentIndex] = true
 		} else {
 			parts  := strings.Split(line, " ")
 			if len(parts) != 1 {
-				return nil, errors.New("found function line without two parts")
+				log.Error(fName)
+				log.Error(line)
+				return nil, 0, errors.New("found function line without two parts")
 			}
 			currentFunc = strings.TrimSuffix(parts[0],":")
 
 			if _, ok := (*mapping)[currentFunc]; !ok {
-				log.Warn("Missing function: ", currentFunc)
+				log.WithFields(log.Fields{"function":currentFunc, "line": lineNum, "file": fName}).Warn("Missing function")
 				currentIndex = -1
 			} else {
 				currentIndex = (*mapping)[currentFunc]
@@ -259,7 +276,7 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, error) {
 	}
 
 	if !goodFile {
-		return nil, errors.New("appears to be a badly formatted file")
+		return nil, 0, errors.New("appears to be a badly formatted file")
 	}
 
 	mismatches := 0
@@ -270,10 +287,10 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, error) {
 	}
 
 	if mismatches != 0 {
-		return nil, errors.New("found mismatches: " + strconv.Itoa(mismatches))
+		return nil, 0, errors.New("found mismatches: " + strconv.Itoa(mismatches))
 	}
 
-	return bv, nil
+	return bv, blocksCovered, nil
 }
 
 
