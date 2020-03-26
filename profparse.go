@@ -96,11 +96,11 @@ func main() {
 
 
 func CombineBVs(vectors [][]bool) ([]bool, int,  error) {
-	bv := make([]bool, 5667885)
+	bv := make([]bool, 5307107)
 
 	// First check and make sure all have the proper length
 	for _, v := range vectors {
-		if v != nil && len(v) != 5667885 {
+		if v != nil && len(v) != 5307107 {
 			return nil, 0, errors.New("improper length bv for combining")
 		}
 	}
