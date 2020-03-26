@@ -195,7 +195,7 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
 
 	scanner := bufio.NewScanner(f)
 
-	bv := make([]bool, 5667885) // Number of blocks that we get coverage data for
+	bv := make([]bool, 5307107) // Number of blocks that we get coverage data for
 
 	currentFunc := ""
 	currentIndex := -1
@@ -280,7 +280,7 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
 	}
 
 	mismatches := 0
-	for i :=0; i<5667885; i++ {
+	for i :=0; i<5307107; i++ {
 		if _, ok := checker[i]; !ok {
 			mismatches += 1
 		}
