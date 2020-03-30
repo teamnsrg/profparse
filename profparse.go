@@ -1,4 +1,4 @@
-package profparse
+package pprof
 
 import (
 	"bufio"
@@ -8,99 +8,70 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 )
+
+var BV_LENGTH int = 5667885
+var BV_FILE_BYTES int = 663389
+
 /*
 func main() {
-	log.Info("Start")
 
-	blockMap := ReadMapping("mapping.csv")
 
-	bv, err := ParseFile("report.txt", blockMap)
+	if len(os.Args) != 3 {
+		log.Fatal("Usage: ./pp <mida_results> <output_file>")
+	}
+
+	paths, err := ioutil.ReadDir(os.Args[1])
 	if err != nil {
 		log.Error(err)
-	}
-	bv2, err := ParseFile("report2.txt", blockMap)
-	if err != nil {
-		log.Error(err)
-	}
-	bv3, err := ParseFile("report3.txt", blockMap)
-	if err != nil {
-		log.Error(err)
-	}
-	bv4, err := ParseFile("report4.txt", blockMap)
-	if err != nil {
-		log.Error(err)
-	}
-	bv5, err := ParseFile("report5.txt", blockMap)
-	if err != nil {
-		log.Error(err)
+		return
 	}
 
-	oneTrues := 0
-	twoTrues := 0
-	threeTrues := 0
-	fourTrues := 0
-	fiveTrues := 0
-	combinedTrues := 0
+	m := make(map[string][]bool)
 
-	for _, val := range bv {
-		if val {
-			oneTrues += 1
+	for _, sitePath := range paths {
+		bv, err := BuildRepresentativeBV(path.Join(os.Args[1], sitePath.Name()), 0.7, 4)
+		if err != nil {
+			log.Error(err)
+			return
 		}
-	}
 
-	for _, val := range bv2 {
-		if val {
-			twoTrues += 1
-		}
-	}
-	for _, val := range bv3 {
-		if val {
-			threeTrues += 1
-		}
-	}
-	for _, val := range bv4 {
-		if val {
-			fourTrues += 1
-		}
-	}
-	for _, val := range bv5 {
-		if val {
-			fiveTrues += 1
-		}
+		m[path.Join(os.Args[1], sitePath.Name())] = bv
 	}
 
-	bvCombined, err := CombineBVs([][]bool{bv, bv2, bv3, bv4, bv5})
+	orderedPaths, orderedBlocks, err := FastGreedy(&m,2)
+
+	f, err := os.Create(os.Args[2])
+	writer := csv.NewWriter(f)
+
+	total := 0
+	for i := range orderedPaths {
+		log.Infof("%d ( %s )", orderedBlocks[i], orderedPaths[i])
+		err = writer.Write([]string{orderedPaths[i],strconv.Itoa(orderedBlocks[i]), strconv.Itoa(total)})
+		if err != nil {
+			log.Error(err)
+		}
+		writer.Flush()
+	}
+
+	err = f.Close()
 	if err != nil {
 		log.Error(err)
 	}
 
-	for _, val := range bvCombined {
-		if val {
-			combinedTrues += 1
-		}
-	}
-
-	log.Infof("bv: %d out of %d", oneTrues, len(bv))
-	log.Infof("bv2: %d out of %d", twoTrues, len(bv2))
-	log.Infof("bv3: %d out of %d", threeTrues, len(bv3))
-	log.Infof("bv4: %d out of %d", fourTrues, len(bv4))
-	log.Infof("bv5: %d out of %d", fiveTrues, len(bv5))
-	log.Infof("bvCombined: %d out of %d", combinedTrues, len(bvCombined))
-
-	log.Info("End")
+	return
 }
 */
 
-
-func CombineBVs(vectors [][]bool) ([]bool, int,  error) {
-	bv := make([]bool, 5667885)
+func CombineBVs(vectors [][]bool) ([]bool, int, error) {
+	bv := make([]bool, BV_LENGTH)
 
 	// First check and make sure all have the proper length
 	for _, v := range vectors {
-		if v != nil && len(v) != 5667885 {
+		if v != nil && len(v) != BV_LENGTH {
 			return nil, 0, errors.New("improper length bv for combining")
 		}
 	}
@@ -123,7 +94,6 @@ func CombineBVs(vectors [][]bool) ([]bool, int,  error) {
 
 	return bv, totalBlocks, nil
 
-
 }
 
 func ReadFile(fName string) ([]bool, error) {
@@ -137,9 +107,9 @@ func ReadFile(fName string) ([]bool, error) {
 		log.Error(err)
 	}
 
-	if len(bytes) != 708486 {
+	if len(bytes) != BV_FILE_BYTES {
 		log.Error("Wrong number of bytes read")
-		log.Error("708486 != ", len(bytes))
+		log.Errorf("%d != %d", BV_FILE_BYTES, len(bytes))
 		return nil, err
 	}
 
@@ -158,8 +128,8 @@ func WriteFile(fName string, bv []bool) error {
 	}
 
 	log.Infof("Wrote %d bytes to file %s", numBytes, fName)
-	if numBytes != 708486 {
-		log.Warnf("Warning: Wrote unexpected number of bytes (708486 expected, %d written)", numBytes)
+	if numBytes != BV_FILE_BYTES {
+		log.Warnf("Warning: Wrote unexpected number of bytes (%d expected, %d written)", BV_FILE_BYTES, numBytes)
 	}
 
 	return nil
@@ -184,7 +154,7 @@ func bytesToBools(b []byte) []bool {
 			}
 		}
 	}
-	return t[:len(t) - 3]
+	return t[:len(t)-3]
 }
 
 func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
@@ -195,7 +165,7 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
 
 	scanner := bufio.NewScanner(f)
 
-	bv := make([]bool, 5667885) // Number of blocks that we get coverage data for
+	bv := make([]bool, BV_LENGTH) // Number of blocks that we get coverage data for
 
 	currentFunc := ""
 	currentIndex := -1
@@ -233,11 +203,11 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
 					log.Error(line)
 				}
 
-				bv[currentIndex + 1 + bIndex] = bVal != 0
+				bv[currentIndex+1+bIndex] = bVal != 0
 				if bVal != 0 {
 					blocksCovered += 1
 				}
-				checker[currentIndex + 1 + bIndex] = true
+				checker[currentIndex+1+bIndex] = true
 			}
 
 		} else if strings.HasPrefix(line, "Function count:") {
@@ -258,16 +228,16 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
 			}
 			checker[currentIndex] = true
 		} else {
-			parts  := strings.Split(line, " ")
+			parts := strings.Split(line, " ")
 			if len(parts) != 1 {
 				log.Error(fName)
 				log.Error(line)
 				return nil, 0, errors.New("found function line without two parts")
 			}
-			currentFunc = strings.TrimSuffix(parts[0],":")
+			currentFunc = strings.TrimSuffix(parts[0], ":")
 
 			if _, ok := (*mapping)[currentFunc]; !ok {
-				log.WithFields(log.Fields{"function":currentFunc, "line": lineNum, "file": fName}).Warn("Missing function")
+				log.WithFields(log.Fields{"function": currentFunc, "line": lineNum, "file": fName}).Warn("Missing function")
 				currentIndex = -1
 			} else {
 				currentIndex = (*mapping)[currentFunc]
@@ -280,7 +250,7 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
 	}
 
 	mismatches := 0
-	for i :=0; i<5667885; i++ {
+	for i := 0; i < 5667885; i++ {
 		if _, ok := checker[i]; !ok {
 			mismatches += 1
 		}
@@ -292,7 +262,6 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
 
 	return bv, blocksCovered, nil
 }
-
 
 // Reads the mapping file and returns the corresponding map structure
 func ReadMapping(fname string) *map[string]int {
@@ -326,4 +295,271 @@ func ReadMapping(fname string) *map[string]int {
 	return &fMap
 }
 
+func GetCovPathCrawl(crawlPath string) (string, error) {
+	covPath := path.Join(crawlPath, "coverage", "coverage.cov")
+	if _, err := os.Stat(covPath); os.IsNotExist(err) {
+		return "", errors.New("coverage data does not exist")
+	}
 
+	return covPath, nil
+}
+
+func GetCovPathsSite(sitePath string) ([]string, error) {
+	subDirs, err := ioutil.ReadDir(sitePath)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]string, 0)
+
+	for _, sd := range subDirs {
+		cp, err := GetCovPathCrawl(path.Join(sitePath, sd.Name()))
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+
+		result = append(result, cp)
+	}
+
+	if len(result) == 0 {
+		return nil, errors.New("no valid coverage data for site")
+	}
+
+	return result, nil
+}
+
+// Given the path to a MIDA crawl results directory, returns a slice of strings containing
+// the paths to all of the coverage (.cov) files contained in it
+func GetCovPathsMIDAResults(rootPath string) ([]string, error) {
+	results := make([]string, 0)
+
+	dirs, err := ioutil.ReadDir(rootPath)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, site := range dirs {
+		paths, err := GetCovPathsSite(path.Join(rootPath, site.Name()))
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+		results = append(results, paths...)
+	}
+	return results, nil
+}
+
+func FriendlyGreedy(paths []string, rounds int) ([]string, []int, error) {
+
+	// Get the length from the first entry in our paths. Every other one must match
+	// this length
+	bv, err := ReadFile(paths[0])
+	if err != nil {
+		return nil, nil, err
+	}
+
+	bvLength := len(bv)
+
+	// Blocks covered so far
+	covered := make(map[int]bool)
+
+	// Keys (paths to cov files) already selected in previous rounds
+	used := make(map[string]bool)
+
+	// We count down
+	roundsRemaining := rounds
+
+	var orderedPaths []string
+	var orderedNumBlocks []int
+
+	for roundsRemaining != 0 && len(covered) != bvLength {
+
+		log.Infof("Rounds Remaining: %d", roundsRemaining)
+		log.Infof("Blocks covered: %d", len(covered))
+		log.Infof("Used: %d", len(used))
+
+		bestCandidate := ""
+		bestCandidateNewCovered := 0
+
+		for _, bvPath := range paths {
+
+			bv, err := ReadFile(bvPath)
+			if err != nil {
+				log.Error(err, " : ", bvPath)
+				continue
+			}
+
+			// Skip over already used bvs
+			if _, ok := used[bvPath]; ok {
+				continue
+			}
+
+			newBlocks := 0
+			for i, val := range bv {
+				if _, ok := covered[i]; !ok && val {
+					newBlocks += 1
+				}
+			}
+
+			if newBlocks > bestCandidateNewCovered {
+				// We found a new best candidate
+				bestCandidate = bvPath
+				bestCandidateNewCovered = newBlocks
+			}
+
+		}
+
+		if bestCandidateNewCovered == 0 {
+			log.Info("Exiting greedy function as have no remaining candidate which covers new blocks")
+			break
+		}
+
+		// We have successfully selected our next candidate, add it to our results and update data
+		// structures accordingly
+		orderedPaths = append(orderedPaths, bestCandidate)
+		orderedNumBlocks = append(orderedNumBlocks, bestCandidateNewCovered)
+
+		winnerBV, err := ReadFile(bestCandidate)
+		if err != nil {
+			return nil, nil, err
+		}
+		for i, val := range winnerBV {
+			if val {
+				covered[i] = true
+			}
+		}
+
+		used[bestCandidate] = true
+
+		roundsRemaining -= 1
+	}
+
+	return orderedPaths, orderedNumBlocks, nil
+
+}
+
+// Takes a mapping of file paths to coverage bit vectors. Executes a greedy algorithm
+// and returns an ordered list of file paths, along with the coverage you get for each.
+// Pass -1 for rounds to do as many rounds as needed to cover all observed blocks
+func FastGreedy(bvs *map[string][]bool, rounds int) ([]string, []int, error) {
+	bvLength := -1
+
+	// Verify that each bit vector is the same the length
+	for _, bv := range *bvs {
+		if bvLength != -1 && bvLength != len(bv) {
+			return nil, nil, errors.New("different bit vector lengths")
+		}
+		bvLength = len(bv)
+	}
+
+	// Blocks covered so far
+	covered := make(map[int]bool)
+
+	// Keys (paths to cov files) already selected in previous rounds
+	used := make(map[string]bool)
+
+	// We count down
+	roundsRemaining := rounds
+
+	var orderedPaths []string
+	var orderedNumBlocks []int
+
+	for roundsRemaining != 0 && len(covered) != bvLength {
+		log.Infof("Rounds Remaining: %d", roundsRemaining)
+		log.Infof("Blocks covered: %d", len(covered))
+		log.Infof("Used: %d", len(used))
+		bestCandidate := ""
+		bestCandidateNewCovered := 0
+
+		for k, bv := range *bvs {
+
+			// Skip over already used bvs
+			if _, ok := used[k]; ok {
+				continue
+			}
+
+			newBlocks := 0
+			for i, val := range bv {
+				if _, ok := covered[i]; !ok && val {
+					newBlocks += 1
+				}
+			}
+
+			if newBlocks > bestCandidateNewCovered {
+				// We found a new best candidate
+				bestCandidate = k
+				bestCandidateNewCovered = newBlocks
+			}
+
+		}
+
+		if bestCandidateNewCovered == 0 {
+			log.Info("Exiting greedy function as have no remaining candidate which covers new blocks")
+			break
+		}
+
+		// We have successfully selected our next candidate, add it to our results and update data
+		// structures accordingly
+		orderedPaths = append(orderedPaths, bestCandidate)
+		orderedNumBlocks = append(orderedNumBlocks, bestCandidateNewCovered)
+
+		for i, val := range (*bvs)[bestCandidate] {
+			if val {
+				covered[i] = true
+			}
+		}
+
+		used[bestCandidate] = true
+
+		roundsRemaining -= 1
+	}
+
+	return orderedPaths, orderedNumBlocks, nil
+}
+
+// Builds a bit vector that is representative of the site's coverage. A site only
+// gets credit for covering a block if more than <threshold> percent of the crawls
+// covered that block. You may also set a minimum number of crawls for a site, and
+// this function will return an error if that minimum is not met.
+func BuildRepresentativeBV(sitePath string, threshold float64, minVisits int) ([]bool, error) {
+	paths, err := GetCovPathsSite(sitePath)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(paths) < minVisits {
+		return nil, errors.New("not enough site visits")
+	}
+
+	m := make(map[int]int)
+
+	// Build map containing total number of crawls which cover each block
+	for _, p := range paths {
+		bv, err := ReadFile(p)
+		if err != nil {
+			return nil, err
+		}
+
+		for i, val := range bv {
+			if _, ok := m[i]; !ok {
+				m[i] = 0
+			}
+
+			if val {
+				m[i] += 1
+			}
+		}
+	}
+
+	result := make([]bool, 0)
+	for i := 0; i < BV_LENGTH; i++ {
+		if float64(m[i])/float64(len(paths)) >= threshold {
+			result = append(result, true)
+		} else {
+			result = append(result, false)
+		}
+	}
+
+	return result, nil
+}
