@@ -1,4 +1,4 @@
-package pprof
+package profparse
 
 import (
 	"bufio"
