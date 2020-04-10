@@ -565,7 +565,7 @@ func BuildRepresentativeBV(sitePath string, threshold float64, minVisits int) ([
 	return result, nil
 }
 
-func CovertProfrawsToCov(dir string, outputFile string, profdataBinary string, mapping *map[string]int) error {
+func ConvertProfrawsToCov(dir string, outputFile string, profdataBinary string, mapping *map[string]int) error {
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
 		return err
