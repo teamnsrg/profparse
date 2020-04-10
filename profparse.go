@@ -67,6 +67,40 @@ func main() {
 }
 */
 
+func MergeBVsThreshold(vectors [][]bool, threshold float64) ([]bool, error) {
+
+	// First check and make sure all have the proper length
+	for _, v := range vectors {
+		if v != nil && len(v) != BV_LENGTH {
+			return nil, errors.New("improper length bv for combining")
+		}
+	}
+
+	if threshold > 1.0 || threshold < 0.0 {
+		return nil, errors.New("bad threshold")
+	}
+
+	counterBV := make([]int, BV_LENGTH)
+	for _, bv := range vectors {
+		for i, bit := range bv {
+			if bit {
+				counterBV[i] += 1
+			}
+		}
+	}
+
+	var finalBV []bool
+	for _, val := range counterBV {
+		if float64(val)/float64(len(vectors)) > threshold {
+			finalBV = append(finalBV, true)
+		} else {
+			finalBV = append(finalBV, false)
+		}
+	}
+
+	return finalBV, nil
+}
+
 func CombineBVs(vectors [][]bool) ([]bool, int, error) {
 	bv := make([]bool, BV_LENGTH)
 
