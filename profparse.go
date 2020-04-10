@@ -8,13 +8,14 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path"
 	"strconv"
 	"strings"
 )
 
-var BV_LENGTH int = 5667885
-var BV_FILE_BYTES int = 663389
+const BV_LENGTH = 5307106
+const BV_FILE_BYTES = 66666 // TODO
 
 /*
 func main() {
@@ -562,4 +563,64 @@ func BuildRepresentativeBV(sitePath string, threshold float64, minVisits int) ([
 	}
 
 	return result, nil
+}
+
+func CovertProfrawsToCov(dir string, outputFile string, profdataBinary string, mapping *map[string]int) error {
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+
+	bvs := make([][]bool, 0)
+	for _, cf := range files {
+		if !strings.HasSuffix(cf.Name(), "profraw") {
+			continue
+		}
+
+		fullCovFile := path.Join(dir, cf.Name())
+		cmd := exec.Command(profdataBinary, "show", "--counts", "--all-functions", fullCovFile)
+		newFileName := strings.ReplaceAll(cf.Name(), "profraw", "txt")
+		f, err := os.Create(path.Join(dir, newFileName))
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+		writer := bufio.NewWriter(f)
+		cmd.Stdout = writer
+		cmd.Stderr = writer
+		err = cmd.Run()
+		if err != nil {
+			log.Error(err, "  :  ", fullCovFile)
+			continue
+		}
+		err = writer.Flush()
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+		err = f.Close()
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+
+		fullReport := path.Join(dir, newFileName)
+		bv, totalBlocks, err := ParseFile(fullReport, mapping)
+		if err != nil {
+			log.Error(err, fullReport)
+			continue
+		}
+
+		log.Infof("%d blocks for %s", totalBlocks, fullCovFile)
+
+		bvs = append(bvs, bv)
+	}
+
+	combinedBV, _, err := CombineBVs(bvs)
+	err = WriteFile(outputFile, combinedBV)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
