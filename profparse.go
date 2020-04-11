@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-const BV_LENGTH = 5667885
+const BV_LENGTH = 5307107
 const BV_FILE_BYTES = 663389 // TODO
 
 /*
