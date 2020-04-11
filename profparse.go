@@ -72,6 +72,7 @@ func MergeBVsThreshold(vectors [][]bool, threshold float64) ([]bool, error) {
 	// First check and make sure all have the proper length
 	for _, v := range vectors {
 		if v != nil && len(v) != BV_LENGTH {
+			log.Error(len(v), " was an unexpected length for BV (expected: ", BV_LENGTH, ")")
 			return nil, errors.New("improper length bv for combining")
 		}
 	}
@@ -624,7 +625,7 @@ func ConvertProfrawsToCov(dir string, outputFile string, profdataBinary string, 
 		cmd.Stderr = writer
 		err = cmd.Run()
 		if err != nil {
-			log.Error(err, "  :  ", fullCovFile)
+			log.Warn(err, "  :  ", fullCovFile)
 			continue
 		}
 		err = writer.Flush()
