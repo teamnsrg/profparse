@@ -14,8 +14,8 @@ import (
 	"strings"
 )
 
-const BV_LENGTH = 5307106
-const BV_FILE_BYTES = 66666 // TODO
+const BV_LENGTH = 5667885
+const BV_FILE_BYTES = 663389 // TODO
 
 /*
 func main() {
@@ -285,7 +285,7 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
 	}
 
 	mismatches := 0
-	for i := 0; i < 5667885; i++ {
+	for i := 0; i < BV_LENGTH; i++ {
 		if _, ok := checker[i]; !ok {
 			mismatches += 1
 		}
