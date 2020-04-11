@@ -20,50 +20,33 @@ const BV_FILE_BYTES = 663389 // TODO
 /*
 func main() {
 
+	//mapping := ReadMapping("mapping.csv")
 
-	if len(os.Args) != 3 {
-		log.Fatal("Usage: ./pp <mida_results> <output_file>")
-	}
-
-	paths, err := ioutil.ReadDir(os.Args[1])
-	if err != nil {
-		log.Error(err)
-		return
-	}
-
-	m := make(map[string][]bool)
-
-	for _, sitePath := range paths {
-		bv, err := BuildRepresentativeBV(path.Join(os.Args[1], sitePath.Name()), 0.7, 4)
-		if err != nil {
-			log.Error(err)
-			return
+	bv := make([]bool,0)
+	for i:=0;i<BV_LENGTH;i++ {
+		if i % 2 == 0 {
+			bv = append(bv, false)
+		} else {
+			bv = append(bv, true)
 		}
-
-		m[path.Join(os.Args[1], sitePath.Name())] = bv
 	}
 
-	orderedPaths, orderedBlocks, err := FastGreedy(&m,2)
 
-	f, err := os.Create(os.Args[2])
-	writer := csv.NewWriter(f)
-
-	total := 0
-	for i := range orderedPaths {
-		log.Infof("%d ( %s )", orderedBlocks[i], orderedPaths[i])
-		err = writer.Write([]string{orderedPaths[i],strconv.Itoa(orderedBlocks[i]), strconv.Itoa(total)})
-		if err != nil {
-			log.Error(err)
-		}
-		writer.Flush()
-	}
-
-	err = f.Close()
+	log.Info(len(bv))
+	err :=WriteFile("newfile.cov", bv)
 	if err != nil {
 		log.Error(err)
 	}
 
-	return
+	newBv, err := ReadFile("newfile.cov")
+	log.Info("length of new one: ", len(newBv))
+
+	for i, val := range newBv {
+		if bv[i] != val {
+			log.Error("problem")
+		}
+		log.Info(val)
+	}
 }
 */
 
@@ -190,7 +173,7 @@ func bytesToBools(b []byte) []bool {
 			}
 		}
 	}
-	return t[:len(t)-3]
+	return t[:len(t)-5]
 }
 
 func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
