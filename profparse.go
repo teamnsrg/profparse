@@ -485,6 +485,7 @@ func FastGreedy(bvs *map[string][]bool, rounds int) ([]string, []int, error) {
 	var orderedNumBlocks []int
 
 	for roundsRemaining != 0 && len(covered) != bvLength {
+
 		log.Infof("Rounds Remaining: %d", roundsRemaining)
 		log.Infof("Blocks covered: %d", len(covered))
 		log.Infof("Used: %d", len(used))
@@ -530,6 +531,8 @@ func FastGreedy(bvs *map[string][]bool, rounds int) ([]string, []int, error) {
 		}
 
 		used[bestCandidate] = true
+
+		log.Info(bestCandidate)
 
 		roundsRemaining -= 1
 	}
