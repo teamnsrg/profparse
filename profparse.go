@@ -582,6 +582,40 @@ func BuildRepresentativeBV(sitePath string, threshold float64, minVisits int) ([
 	return result, nil
 }
 
+func ConvertProfrawToText(infile string, outfile string, profdataBinary string) error {
+	if !strings.HasSuffix(infile, ".profraw") {
+		return errors.New("file \"" + infile + "\" does not have profraw suffix")
+	}
+
+	cmd := exec.Command(profdataBinary, "show", "--counts", "--all-functions", infile)
+
+	f, err := os.Create(outfile)
+	if err != nil {
+		return err
+	}
+
+	writer := bufio.NewWriter(f)
+	cmd.Stdout = writer
+	cmd.Stderr = writer
+
+	err = cmd.Run()
+	if err != nil {
+		return err
+	}
+
+	err = writer.Flush()
+	if err != nil {
+		return err
+	}
+
+	err = f.Close()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func ConvertProfrawsToCov(dir string, outputFile string, profdataBinary string, mapping *map[string]int) error {
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
