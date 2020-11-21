@@ -14,39 +14,36 @@ import (
 	"strings"
 )
 
-const BV_LENGTH = 5307107
-const BV_FILE_BYTES = 663389 // TODO
+const BV_LENGTH = 5733715
+const BV_FILE_BYTES = 716715
+const EXPECTED_MISMATCHES = 39 // from duplicate function/symbol names
 
 /*
 func main() {
 
-	//mapping := ReadMapping("mapping.csv")
+	mapping := ReadMapping("mapping.csv")
 
-	bv := make([]bool,0)
-	for i:=0;i<BV_LENGTH;i++ {
-		if i % 2 == 0 {
-			bv = append(bv, false)
-		} else {
-			bv = append(bv, true)
-		}
-	}
-
-
-	log.Info(len(bv))
-	err :=WriteFile("newfile.cov", bv)
+	err := ConvertProfrawsToCov("covfiles", "cov.cov","./llvm-profdata", mapping)
 	if err != nil {
 		log.Error(err)
 	}
 
-	newBv, err := ReadFile("newfile.cov")
-	log.Info("length of new one: ", len(newBv))
 
-	for i, val := range newBv {
-		if bv[i] != val {
-			log.Error("problem")
-		}
-		log.Info(val)
-	}
+	//log.Info(len(bv))
+	//err :=WriteFile("newfile.cov", bv)
+	//if err != nil {
+	//	log.Error(err)
+	//}
+	//
+	//newBv, err := ReadFile("newfile.cov")
+	//log.Info("length of new one: ", len(newBv))
+	//
+	//for i, val := range newBv {
+	//	if bv[i] != val {
+	//		log.Error("problem")
+	//	}
+	//	log.Info(val)
+	//}
 }
 */
 
@@ -146,7 +143,7 @@ func WriteFile(fName string, bv []bool) error {
 		return err
 	}
 
-	log.Infof("Wrote %d bytes to file %s", numBytes, fName)
+	log.Debugf("Wrote %d bytes to file %s", numBytes, fName)
 	if numBytes != BV_FILE_BYTES {
 		log.Warnf("Warning: Wrote unexpected number of bytes (%d expected, %d written)", BV_FILE_BYTES, numBytes)
 	}
@@ -245,6 +242,7 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
 			if fCount != 0 {
 				blocksCovered += 1
 			}
+
 			checker[currentIndex] = true
 		} else {
 			parts := strings.Split(line, " ")
@@ -275,7 +273,7 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
 		}
 	}
 
-	if mismatches != 0 {
+	if mismatches != 0 && mismatches != EXPECTED_MISMATCHES {
 		return nil, 0, errors.New("found mismatches: " + strconv.Itoa(mismatches))
 	}
 
@@ -532,8 +530,6 @@ func FastGreedy(bvs *map[string][]bool, rounds int) ([]string, []int, error) {
 
 		used[bestCandidate] = true
 
-		log.Info(bestCandidate)
-
 		roundsRemaining -= 1
 	}
 
@@ -628,11 +624,11 @@ func ConvertProfrawsToCov(dir string, outputFile string, profdataBinary string, 
 		fullReport := path.Join(dir, newFileName)
 		bv, totalBlocks, err := ParseFile(fullReport, mapping)
 		if err != nil {
-			log.Error(err, fullReport)
+			log.Error(err, " (", fullReport, ")")
 			continue
 		}
 
-		log.Infof("%d blocks for %s", totalBlocks, fullCovFile)
+		log.Debugf("%d blocks for %s", totalBlocks, fullCovFile)
 
 		bvs = append(bvs, bv)
 	}
