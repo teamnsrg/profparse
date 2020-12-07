@@ -12,38 +12,75 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 )
 
-const BV_LENGTH = 5733715
-const BV_FILE_BYTES = 716715
-const EXPECTED_MISMATCHES = 39 // from duplicate function/symbol names
+var CovMapping map[string]int
+var CovMappingLength int
+var CovFileByteLength int
+var once sync.Once
 
 /*
 func main() {
-
-	mapping := ReadMapping("mapping.csv")
-
-	err := ConvertProfrawsToCov("covfiles", "cov.cov","./llvm-profdata", mapping)
+	err := ReadMapping("mapping.csv")
 	if err != nil {
 		log.Error(err)
+		return
+	} else {
+		log.Info("Successfully read the mapping")
+		log.Infof("%d Functions", len(CovMapping))
+		log.Infof("%d Blocks", CovMappingLength)
+		log.Infof("Expecting bv files to be %d bytes", CovFileByteLength)
 	}
 
+	COV_FILE_DIR := "covSamples"
 
-	//log.Info(len(bv))
-	//err :=WriteFile("newfile.cov", bv)
-	//if err != nil {
-	//	log.Error(err)
-	//}
-	//
-	//newBv, err := ReadFile("newfile.cov")
-	//log.Info("length of new one: ", len(newBv))
-	//
-	//for i, val := range newBv {
-	//	if bv[i] != val {
-	//		log.Error("problem")
-	//	}
-	//	log.Info(val)
-	//}
+	files, err := ioutil.ReadDir(COV_FILE_DIR)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
+	blockCounts := make([]int, CovMappingLength)
+	bvs := make([][]bool,0)
+
+	log.Info("Loading bit vectors...")
+
+	for _, f := range files {
+		bv, err := ReadFile(path.Join(COV_FILE_DIR, f.Name()))
+		if err != nil {
+			log.Error(err)
+			return
+		}
+		for i, val := range bv {
+			if val {
+				blockCounts[i]++
+			}
+		}
+
+		bvs = append(bvs, bv)
+	}
+
+	log.Infof("Loaded %d bit vectors of coverage data", len(bvs))
+
+	nonZero := 0
+	all := 0
+	for _, count := range blockCounts {
+		if count > 0 {
+			nonZero++
+		}
+
+		if count == 300 {
+			all++
+		}
+	}
+
+	log.Infof("Altogether, these sites covered %d out of %d blocks (%f percent)",
+		nonZero, len(blockCounts), float64(nonZero) * 100.0 / float64(len(blockCounts)))
+	log.Infof("%d blocks were covered by every single run (%f percent)", all,
+		float64(all) * 100.0 / float64(len(blockCounts)))
+	
+
 }
 */
 
@@ -51,8 +88,8 @@ func MergeBVsThreshold(vectors [][]bool, threshold float64) ([]bool, error) {
 
 	// First check and make sure all have the proper length
 	for _, v := range vectors {
-		if v != nil && len(v) != BV_LENGTH {
-			log.Error(len(v), " was an unexpected length for BV (expected: ", BV_LENGTH, ")")
+		if v != nil && len(v) != CovMappingLength {
+			log.Error(len(v), " was an unexpected length for BV (expected: ", CovMappingLength, ")")
 			return nil, errors.New("improper length bv for combining")
 		}
 	}
@@ -61,7 +98,7 @@ func MergeBVsThreshold(vectors [][]bool, threshold float64) ([]bool, error) {
 		return nil, errors.New("bad threshold")
 	}
 
-	counterBV := make([]int, BV_LENGTH)
+	counterBV := make([]int, CovMappingLength)
 	for _, bv := range vectors {
 		for i, bit := range bv {
 			if bit {
@@ -83,11 +120,11 @@ func MergeBVsThreshold(vectors [][]bool, threshold float64) ([]bool, error) {
 }
 
 func CombineBVs(vectors [][]bool) ([]bool, int, error) {
-	bv := make([]bool, BV_LENGTH)
+	bv := make([]bool, CovMappingLength)
 
 	// First check and make sure all have the proper length
 	for _, v := range vectors {
-		if v != nil && len(v) != BV_LENGTH {
+		if v != nil && len(v) != CovMappingLength {
 			return nil, 0, errors.New("improper length bv for combining")
 		}
 	}
@@ -113,6 +150,10 @@ func CombineBVs(vectors [][]bool) ([]bool, int, error) {
 }
 
 func ReadFile(fName string) ([]bool, error) {
+	if CovMappingLength == 0 || len(CovMapping) == 0 {
+		return nil, errors.New("cov mapping uninitialized")
+	}
+
 	f, err := os.Open(fName)
 	if err != nil {
 		return nil, err
@@ -123,9 +164,9 @@ func ReadFile(fName string) ([]bool, error) {
 		log.Error(err)
 	}
 
-	if len(bytes) != BV_FILE_BYTES {
+	if len(bytes) != CovFileByteLength {
 		log.Error("Wrong number of bytes read")
-		log.Errorf("%d != %d", BV_FILE_BYTES, len(bytes))
+		log.Errorf("%d != %d", CovFileByteLength, len(bytes))
 		return nil, err
 	}
 
@@ -144,8 +185,8 @@ func WriteFile(fName string, bv []bool) error {
 	}
 
 	log.Debugf("Wrote %d bytes to file %s", numBytes, fName)
-	if numBytes != BV_FILE_BYTES {
-		log.Warnf("Warning: Wrote unexpected number of bytes (%d expected, %d written)", BV_FILE_BYTES, numBytes)
+	if numBytes != CovFileByteLength {
+		log.Warnf("Warning: Wrote unexpected number of bytes (%d expected, %d written)", CovFileByteLength, numBytes)
 	}
 
 	return nil
@@ -170,10 +211,14 @@ func bytesToBools(b []byte) []bool {
 			}
 		}
 	}
-	return t[:len(t)-5]
+	return t[:len(t)- (8 - (CovMappingLength% 8))]
 }
 
-func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
+func ParseFile(fName string) ([]bool, int, error) {
+	if CovMappingLength == 0 || len(CovMapping) == 0 {
+		return nil, 0, errors.New("cov mapping uninitialized")
+	}
+
 	f, err := os.Open(fName)
 	if err != nil {
 		log.Error(err)
@@ -181,7 +226,7 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
 
 	scanner := bufio.NewScanner(f)
 
-	bv := make([]bool, BV_LENGTH) // Number of blocks that we get coverage data for
+	bv := make([]bool, CovMappingLength) // Number of blocks that we get coverage data for
 
 	currentFunc := ""
 	currentIndex := -1
@@ -253,11 +298,11 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
 			}
 			currentFunc = strings.TrimSuffix(parts[0], ":")
 
-			if _, ok := (*mapping)[currentFunc]; !ok {
+			if _, ok := CovMapping[currentFunc]; !ok {
 				log.WithFields(log.Fields{"function": currentFunc, "line": lineNum, "file": fName}).Warn("Missing function")
 				currentIndex = -1
 			} else {
-				currentIndex = (*mapping)[currentFunc]
+				currentIndex = CovMapping[currentFunc]
 			}
 		}
 	}
@@ -267,13 +312,13 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
 	}
 
 	mismatches := 0
-	for i := 0; i < BV_LENGTH; i++ {
+	for i := 0; i < CovMappingLength; i++ {
 		if _, ok := checker[i]; !ok {
 			mismatches += 1
 		}
 	}
 
-	if mismatches != 0 && mismatches != EXPECTED_MISMATCHES {
+	if mismatches != 0 {
 		return nil, 0, errors.New("found mismatches: " + strconv.Itoa(mismatches))
 	}
 
@@ -281,39 +326,47 @@ func ParseFile(fName string, mapping *map[string]int) ([]bool, int, error) {
 }
 
 // Reads the mapping file and returns the corresponding map structure
-func ReadMapping(fname string) *map[string]int {
+func ReadMapping(fname string) error {
 	f, err := os.Open(fname)
 	if err != nil {
 		log.Error(err)
 	}
 
-	fMap := make(map[string]int)
-
 	reader := csv.NewReader(f)
+
+	CovMapping = make(map[string]int)
 
 	for {
 		row, err := reader.Read()
 		if err == io.EOF {
 			break
 		} else if err != nil {
-			log.Error(err)
-			break
+			return err
 		}
 
 		index, err := strconv.Atoi(row[1])
 		if err != nil {
-			log.Error(err)
-			break
+			return err
 		}
 
-		fMap[row[0]] = index
+		if row[0] == "END" {
+			CovMappingLength = index
+		} else {
+			CovMapping[row[0]] = index
+		}
 	}
 
-	return &fMap
+	if CovMappingLength% 8 == 0 {
+		CovFileByteLength = CovMappingLength / 8
+	} else {
+		CovFileByteLength = CovMappingLength/ 8 + 1
+	}
+
+	return nil
 }
 
 func GetCovPathCrawl(crawlPath string) (string, error) {
-	covPath := path.Join(crawlPath, "coverage", "coverage.cov")
+	covPath := path.Join(crawlPath, "coverage", "coverage.bv")
 	if _, err := os.Stat(covPath); os.IsNotExist(err) {
 		return "", errors.New("coverage data does not exist")
 	}
@@ -571,7 +624,7 @@ func BuildRepresentativeBV(sitePath string, threshold float64, minVisits int) ([
 	}
 
 	result := make([]bool, 0)
-	for i := 0; i < BV_LENGTH; i++ {
+	for i := 0; i < CovMappingLength; i++ {
 		if float64(m[i])/float64(len(paths)) >= threshold {
 			result = append(result, true)
 		} else {
@@ -656,7 +709,7 @@ func ConvertProfrawsToCov(dir string, outputFile string, profdataBinary string, 
 		}
 
 		fullReport := path.Join(dir, newFileName)
-		bv, totalBlocks, err := ParseFile(fullReport, mapping)
+		bv, totalBlocks, err := ParseFile(fullReport)
 		if err != nil {
 			log.Error(err, " (", fullReport, ")")
 			continue
@@ -674,4 +727,78 @@ func ConvertProfrawsToCov(dir string, outputFile string, profdataBinary string, 
 	}
 
 	return nil
+}
+
+func WriteCovFile(fName string, bv []bool) error {
+	f, err := os.Create(fName)
+	if err != nil {
+		return err
+	}
+
+	_, err = f.Write(boolsToBytes(bv))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ParseMergedTextfile(fname string, mapping map[string]int) ([]bool, int, error) {
+	if CovMappingLength == 0 || CovMapping == nil {
+		return nil, 0, errors.New("coverage map has not been initialized")
+	}
+
+	result := make([]bool, CovMappingLength)
+
+	f, err := os.Open(fname)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	fn := ""
+	index := -1
+	counters := false
+	coveredBlocks := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			fn = ""
+			index = -1
+			counters = false
+			continue
+		}
+
+		if fn == "" {
+			fn = strings.TrimSpace(line)
+			if _, ok := mapping[fn]; !ok {
+				return nil, 0, errors.New("unknown function: " + fn)
+			}
+			index = mapping[fn]
+			continue
+		}
+
+		if strings.HasPrefix(line, "# Counter V") {
+			counters = true
+			continue
+		}
+
+		if counters {
+			executions, err := strconv.Atoi(line)
+			if err != nil {
+				return nil, 0, err
+			}
+			if executions > 0 {
+				result[index] = true
+				coveredBlocks += 1
+			}
+			index++
+		}
+	}
+	if err = scanner.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	return result, coveredBlocks, nil
 }
