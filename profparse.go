@@ -158,6 +158,7 @@ func ReadFile(fName string) ([]bool, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer f.Close()
 
 	bytes, err := ioutil.ReadAll(f)
 	if err != nil {
