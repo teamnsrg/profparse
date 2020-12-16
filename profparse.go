@@ -16,8 +16,10 @@ import (
 )
 
 var CovMapping map[string]int
+var CovMappingBlockCounts map[string]int
 var CovMappingLength int
 var CovFileByteLength int
+var FileMapping map[string]string
 var once sync.Once
 
 /*
@@ -31,6 +33,32 @@ func main() {
 		log.Infof("%d Functions", len(CovMapping))
 		log.Infof("%d Blocks", CovMappingLength)
 		log.Infof("Expecting bv files to be %d bytes", CovFileByteLength)
+	}
+
+	err = ReadFileMapping("file_mapping.csv")
+	if err != nil {
+		log.Error(err)
+		return
+	} else {
+		log.Info("Successfully read file mapping")
+	}
+
+	log.Info("Calculating number of blocks in each top level dir")
+	topLevelBlocks := make(map[string]int)
+	for s := range FileMapping {
+		topLevelDir := strings.Split(FileMapping[s], "/")[0]
+
+		if _, ok := topLevelBlocks[topLevelDir]; !ok {
+			topLevelBlocks[topLevelDir] = 0
+		}
+	}
+
+	for s := range CovMappingBlockCounts {
+		if _, ok := FileMapping[s]; !ok {
+			continue
+		}
+		topLevelDir := strings.Split(FileMapping[s], "/")[0]
+		topLevelBlocks[topLevelDir] += CovMappingBlockCounts[s]
 	}
 
 	COV_FILE_DIR := "covSamples"
@@ -79,10 +107,41 @@ func main() {
 		nonZero, len(blockCounts), float64(nonZero) * 100.0 / float64(len(blockCounts)))
 	log.Infof("%d blocks were covered by every single run (%f percent)", all,
 		float64(all) * 100.0 / float64(len(blockCounts)))
-	
+
+	totalBV, _, err := CombineBVs(bvs)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
+	topLevelCovered := make(map[string]int)
+	for k := range topLevelBlocks {
+		topLevelCovered[k] = 0
+	}
+
+	for symbol, fname := range FileMapping {
+		if _, ok := CovMappingBlockCounts[symbol]; !ok {
+			continue
+		}
+
+		numBlocks := CovMappingBlockCounts[symbol]
+		startBlock := CovMapping[symbol]
+		topLevelDir := strings.Split(fname, "/")[0]
+
+		for i := startBlock; i < startBlock + numBlocks; i++ {
+			if totalBV[i] {
+				topLevelCovered[topLevelDir]++
+			}
+		}
+	}
+
+	for k := range topLevelCovered {
+		fmt.Println(k, ":", topLevelCovered[k], "/", topLevelBlocks[k], "(", math.Round(float64(topLevelCovered[k]) / float64(topLevelBlocks[k]) * 100), "% )")
+	}
+
 
 }
-*/
+
 
 func MergeBVsThreshold(vectors [][]bool, threshold float64) ([]bool, error) {
 
@@ -118,6 +177,7 @@ func MergeBVsThreshold(vectors [][]bool, threshold float64) ([]bool, error) {
 
 	return finalBV, nil
 }
+*/
 
 func CombineBVs(vectors [][]bool) ([]bool, int, error) {
 	bv := make([]bool, CovMappingLength)
@@ -212,7 +272,7 @@ func bytesToBools(b []byte) []bool {
 			}
 		}
 	}
-	return t[:len(t)- (8 - (CovMappingLength% 8))]
+	return t[:len(t)-(8-(CovMappingLength%8))]
 }
 
 func ParseFile(fName string) ([]bool, int, error) {
@@ -336,6 +396,10 @@ func ReadMapping(fname string) error {
 	reader := csv.NewReader(f)
 
 	CovMapping = make(map[string]int)
+	CovMappingBlockCounts = make(map[string]int)
+
+	prevSymbol := ""
+	prevIndex := 0
 
 	for {
 		row, err := reader.Read()
@@ -355,12 +419,40 @@ func ReadMapping(fname string) error {
 		} else {
 			CovMapping[row[0]] = index
 		}
+
+		CovMappingBlockCounts[prevSymbol] = index - prevIndex
+		prevSymbol = row[0]
+		prevIndex = index
 	}
 
-	if CovMappingLength% 8 == 0 {
+	if CovMappingLength%8 == 0 {
 		CovFileByteLength = CovMappingLength / 8
 	} else {
-		CovFileByteLength = CovMappingLength/ 8 + 1
+		CovFileByteLength = CovMappingLength/8 + 1
+	}
+
+	return nil
+}
+
+func ReadFileMapping(fname string) error {
+	f, err := os.Open(fname)
+	if err != nil {
+		return err
+	}
+
+	reader := csv.NewReader(f)
+
+	FileMapping = make(map[string]string)
+
+	for {
+		row, err := reader.Read()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return err
+		}
+
+		FileMapping[row[0]] = row[1]
 	}
 
 	return nil
