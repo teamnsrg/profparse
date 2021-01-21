@@ -2,25 +2,17 @@ package profparse
 
 import (
 	"bufio"
-	"encoding/csv"
+	"bytes"
+	"encoding/binary"
 	"errors"
 	log "github.com/sirupsen/logrus"
-	"io"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
-	"sync"
 )
-
-var CovMapping map[string]int
-var CovMappingBlockCounts map[string]int
-var CovMappingLength int
-var CovFileByteLength int
-var FileMapping map[string]string
-var once sync.Once
 
 /*
 func main() {
@@ -179,6 +171,7 @@ func MergeBVsThreshold(vectors [][]bool, threshold float64) ([]bool, error) {
 }
 */
 
+/*
 func CombineBVs(vectors [][]bool) ([]bool, int, error) {
 	bv := make([]bool, CovMappingLength)
 
@@ -208,11 +201,9 @@ func CombineBVs(vectors [][]bool) ([]bool, int, error) {
 	return bv, totalBlocks, nil
 
 }
+*/
 
-func ReadFile(fName string) ([]bool, error) {
-	if CovMappingLength == 0 || len(CovMapping) == 0 {
-		return nil, errors.New("cov mapping uninitialized")
-	}
+func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
 
 	f, err := os.Open(fName)
 	if err != nil {
@@ -220,61 +211,208 @@ func ReadFile(fName string) ([]bool, error) {
 	}
 	defer f.Close()
 
-	bytes, err := ioutil.ReadAll(f)
-	if err != nil {
-		log.Error(err)
+	scanner := bufio.NewScanner(f)
+
+	covMap := make(map[string]map[string][]bool)
+	currentFile := ""
+	currentFunc := ""
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		pieces := strings.Split(strings.TrimSpace(line), " ")
+		if len(pieces) < 2 {
+			continue
+		}
+
+		if pieces[0] == "[FILE]" {
+			currentFile = pieces[1]
+			if _, ok := covMap[currentFile]; !ok {
+				covMap[currentFile] = make(map[string][]bool)
+			}
+		} else if pieces[0] == "[FUNCTION]" {
+			if currentFile == "" {
+				return nil, errors.New("function without a file")
+			}
+
+			currentFunc = pieces[1]
+			if _, ok := covMap[currentFile][currentFunc]; !ok {
+				covMap[currentFile][currentFunc] = make([]bool, 0)
+			}
+		} else if pieces[0] == "[BLOCK]" {
+			if currentFile == "" || currentFunc == "" {
+				return nil, errors.New("block without a function or file")
+			}
+
+			if len(pieces) != 5 {
+				return nil, errors.New("wrong number of pieces in BLOCK line")
+			}
+
+			executions, err := strconv.ParseUint(pieces[4], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+
+			if executions != 0 {
+				covMap[currentFile][currentFunc] = append(covMap[currentFile][currentFunc], true)
+			} else {
+				covMap[currentFile][currentFunc] = append(covMap[currentFile][currentFunc], false)
+			}
+
+		}
 	}
 
-	if len(bytes) != CovFileByteLength {
-		log.Error("Wrong number of bytes read")
-		log.Errorf("%d != %d", CovFileByteLength, len(bytes))
-		return nil, err
-	}
-
-	return bytesToBools(bytes), nil
+	return covMap, nil
 }
 
-func WriteFile(fName string, bv []bool) error {
-	f, err := os.Create(fName)
+func WriteCovMapToFile(fname string, covMap map[string]map[string][]bool) error {
+
+	f, err := os.Create(fname)
 	if err != nil {
 		return err
 	}
+	defer f.Close()
+	writer := bufio.NewWriter(f)
 
-	numBytes, err := f.Write(boolsToBytes(bv))
-	if err != nil {
-		return err
+	fileNames := make([]string, 0, len(covMap))
+	for k := range covMap {
+		fileNames = append(fileNames, k)
 	}
+	sort.Strings(fileNames)
 
-	log.Debugf("Wrote %d bytes to file %s", numBytes, fName)
-	if numBytes != CovFileByteLength {
-		log.Warnf("Warning: Wrote unexpected number of bytes (%d expected, %d written)", CovFileByteLength, numBytes)
+	for _, fileName := range fileNames {
+
+		_, err = writer.WriteString("[FILE] " + fileName + "\n")
+		if err != nil {
+			return err
+		}
+
+		funcNames := make([]string, 0, len(covMap[fileName]))
+		for k := range covMap[fileName] {
+			funcNames = append(funcNames, k)
+		}
+
+		sort.Strings(funcNames)
+
+		for _, funcName := range funcNames {
+			_, err = writer.WriteString("    " + funcName + " " + strconv.Itoa(len(covMap[fileName][funcName])) + "\n")
+		}
 	}
 
 	return nil
 }
 
-func boolsToBytes(t []bool) []byte {
+func WriteFileFromBV(fName string, bv []bool) error {
+	f, err := os.Create(fName)
+	if err != nil {
+		return err
+	}
+
+	bytesToWrite, err := boolsToBytes(bv)
+	if err != nil {
+		return err
+	}
+
+	numBytes, err := f.Write(bytesToWrite)
+	if err != nil {
+		return err
+	}
+
+	log.Debugf("Wrote %d bytes to file %s", numBytes, fName)
+
+	return nil
+}
+
+func ReadBVFileToBV(fname string) ([]bool, error) {
+	content, err := ioutil.ReadFile(fname)
+	if err != nil {
+		return nil, err
+	}
+
+	bv, err := bytesToBools(content)
+	if err != nil {
+		return nil, err
+	}
+
+	return bv, nil
+}
+
+func ConvertCovMapToBools(covMap map[string]map[string][]bool) []bool {
+
+	bools := make([]bool, 0)
+	fileNames := make([]string, 0, len(covMap))
+	for k := range covMap {
+		fileNames = append(fileNames, k)
+	}
+	sort.Strings(fileNames)
+
+	for _, fileName := range fileNames {
+		funcNames := make([]string, 0, len(covMap[fileName]))
+		for k := range covMap[fileName] {
+			funcNames = append(funcNames, k)
+		}
+
+		sort.Strings(funcNames)
+
+		for _, funcName := range funcNames {
+			for _, executions := range covMap[fileName][funcName] {
+				if executions {
+					bools = append(bools, true)
+				} else {
+					bools = append(bools, false)
+				}
+			}
+		}
+	}
+
+	return bools
+}
+
+func boolsToBytes(t []bool) ([]byte, error) {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.LittleEndian, uint32(len(t)))
+	if err != nil {
+		return nil, err
+	}
+
 	b := make([]byte, (len(t)+7)/8)
 	for i, x := range t {
 		if x {
 			b[i/8] |= 0x80 >> uint(i%8)
 		}
 	}
-	return b
+
+	b = append(buf.Bytes(), b...)
+
+	log.Infof("Writing a file with %d bytes (%d + %d)", len(b), len(buf.Bytes()), (len(t)+7)/8)
+
+	return b, nil
 }
 
-func bytesToBools(b []byte) []bool {
-	t := make([]bool, 8*len(b))
-	for i, x := range b {
+func bytesToBools(b []byte) ([]bool, error) {
+	if len(b) < 4 {
+		return nil, errors.New("invalid bit vector file")
+	}
+
+	buf := bytes.NewReader(b[0:4])
+
+	var numBits uint32
+	err := binary.Read(buf, binary.LittleEndian, &numBits)
+	if err != nil {
+		return nil, err
+	}
+
+	t := make([]bool, numBits)
+	for i, x := range b[4:] {
 		for j := 0; j < 8; j++ {
 			if (x<<uint(j))&0x80 == 0x80 {
 				t[8*i+j] = true
 			}
 		}
 	}
-	return t[:len(t)-(8-(CovMappingLength%8))]
+	return t, nil
 }
 
+/*
 func ParseFile(fName string) ([]bool, int, error) {
 	if CovMappingLength == 0 || len(CovMapping) == 0 {
 		return nil, 0, errors.New("cov mapping uninitialized")
@@ -386,6 +524,10 @@ func ParseFile(fName string) ([]bool, int, error) {
 	return bv, blocksCovered, nil
 }
 
+*/
+
+/*
+
 // Reads the mapping file and returns the corresponding map structure
 func ReadMapping(fname string) error {
 	f, err := os.Open(fname)
@@ -458,6 +600,8 @@ func ReadFileMapping(fname string) error {
 	return nil
 }
 
+*/
+
 func GetCovPathCrawl(crawlPath string) (string, error) {
 	covPath := path.Join(crawlPath, "coverage", "coverage.bv")
 	if _, err := os.Stat(covPath); os.IsNotExist(err) {
@@ -513,174 +657,7 @@ func GetCovPathsMIDAResults(rootPath string) ([]string, error) {
 	return results, nil
 }
 
-func FriendlyGreedy(paths []string, rounds int) ([]string, []int, error) {
-
-	// Get the length from the first entry in our paths. Every other one must match
-	// this length
-	bv, err := ReadFile(paths[0])
-	if err != nil {
-		return nil, nil, err
-	}
-
-	bvLength := len(bv)
-
-	// Blocks covered so far
-	covered := make(map[int]bool)
-
-	// Keys (paths to cov files) already selected in previous rounds
-	used := make(map[string]bool)
-
-	// We count down
-	roundsRemaining := rounds
-
-	var orderedPaths []string
-	var orderedNumBlocks []int
-
-	for roundsRemaining != 0 && len(covered) != bvLength {
-
-		log.Infof("Rounds Remaining: %d", roundsRemaining)
-		log.Infof("Blocks covered: %d", len(covered))
-		log.Infof("Used: %d", len(used))
-
-		bestCandidate := ""
-		bestCandidateNewCovered := 0
-
-		for _, bvPath := range paths {
-
-			bv, err := ReadFile(bvPath)
-			if err != nil {
-				log.Error(err, " : ", bvPath)
-				continue
-			}
-
-			// Skip over already used bvs
-			if _, ok := used[bvPath]; ok {
-				continue
-			}
-
-			newBlocks := 0
-			for i, val := range bv {
-				if _, ok := covered[i]; !ok && val {
-					newBlocks += 1
-				}
-			}
-
-			if newBlocks > bestCandidateNewCovered {
-				// We found a new best candidate
-				bestCandidate = bvPath
-				bestCandidateNewCovered = newBlocks
-			}
-
-		}
-
-		if bestCandidateNewCovered == 0 {
-			log.Info("Exiting greedy function as have no remaining candidate which covers new blocks")
-			break
-		}
-
-		// We have successfully selected our next candidate, add it to our results and update data
-		// structures accordingly
-		orderedPaths = append(orderedPaths, bestCandidate)
-		orderedNumBlocks = append(orderedNumBlocks, bestCandidateNewCovered)
-
-		winnerBV, err := ReadFile(bestCandidate)
-		if err != nil {
-			return nil, nil, err
-		}
-		for i, val := range winnerBV {
-			if val {
-				covered[i] = true
-			}
-		}
-
-		used[bestCandidate] = true
-
-		roundsRemaining -= 1
-	}
-
-	return orderedPaths, orderedNumBlocks, nil
-
-}
-
-// Takes a mapping of file paths to coverage bit vectors. Executes a greedy algorithm
-// and returns an ordered list of file paths, along with the coverage you get for each.
-// Pass -1 for rounds to do as many rounds as needed to cover all observed blocks
-func FastGreedy(bvs *map[string][]bool, rounds int) ([]string, []int, error) {
-	bvLength := -1
-
-	// Verify that each bit vector is the same the length
-	for _, bv := range *bvs {
-		if bvLength != -1 && bvLength != len(bv) {
-			return nil, nil, errors.New("different bit vector lengths")
-		}
-		bvLength = len(bv)
-	}
-
-	// Blocks covered so far
-	covered := make(map[int]bool)
-
-	// Keys (paths to cov files) already selected in previous rounds
-	used := make(map[string]bool)
-
-	// We count down
-	roundsRemaining := rounds
-
-	var orderedPaths []string
-	var orderedNumBlocks []int
-
-	for roundsRemaining != 0 && len(covered) != bvLength {
-
-		log.Infof("Rounds Remaining: %d", roundsRemaining)
-		log.Infof("Blocks covered: %d", len(covered))
-		log.Infof("Used: %d", len(used))
-		bestCandidate := ""
-		bestCandidateNewCovered := 0
-
-		for k, bv := range *bvs {
-
-			// Skip over already used bvs
-			if _, ok := used[k]; ok {
-				continue
-			}
-
-			newBlocks := 0
-			for i, val := range bv {
-				if _, ok := covered[i]; !ok && val {
-					newBlocks += 1
-				}
-			}
-
-			if newBlocks > bestCandidateNewCovered {
-				// We found a new best candidate
-				bestCandidate = k
-				bestCandidateNewCovered = newBlocks
-			}
-
-		}
-
-		if bestCandidateNewCovered == 0 {
-			log.Info("Exiting greedy function as have no remaining candidate which covers new blocks")
-			break
-		}
-
-		// We have successfully selected our next candidate, add it to our results and update data
-		// structures accordingly
-		orderedPaths = append(orderedPaths, bestCandidate)
-		orderedNumBlocks = append(orderedNumBlocks, bestCandidateNewCovered)
-
-		for i, val := range (*bvs)[bestCandidate] {
-			if val {
-				covered[i] = true
-			}
-		}
-
-		used[bestCandidate] = true
-
-		roundsRemaining -= 1
-	}
-
-	return orderedPaths, orderedNumBlocks, nil
-}
+/*
 
 // Builds a bit vector that is representative of the site's coverage. A site only
 // gets credit for covering a block if more than <threshold> percent of the crawls
@@ -728,41 +705,7 @@ func BuildRepresentativeBV(sitePath string, threshold float64, minVisits int) ([
 	return result, nil
 }
 
-func ConvertProfrawToText(infile string, outfile string, profdataBinary string) error {
-	if !strings.HasSuffix(infile, ".profraw") {
-		return errors.New("file \"" + infile + "\" does not have profraw suffix")
-	}
-
-	cmd := exec.Command(profdataBinary, "show", "--counts", "--all-functions", infile)
-
-	f, err := os.Create(outfile)
-	if err != nil {
-		return err
-	}
-
-	writer := bufio.NewWriter(f)
-	cmd.Stdout = writer
-	cmd.Stderr = writer
-
-	err = cmd.Run()
-	if err != nil {
-		return err
-	}
-
-	err = writer.Flush()
-	if err != nil {
-		return err
-	}
-
-	err = f.Close()
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func ConvertProfrawsToCov(dir string, outputFile string, profdataBinary string, mapping *map[string]int) error {
+func ConvertProfrawsToCovFile(dir string, outputFile string, profdataBinary string) error {
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
 		return err
@@ -822,76 +765,4 @@ func ConvertProfrawsToCov(dir string, outputFile string, profdataBinary string, 
 	return nil
 }
 
-func WriteCovFile(fName string, bv []bool) error {
-	f, err := os.Create(fName)
-	if err != nil {
-		return err
-	}
-
-	_, err = f.Write(boolsToBytes(bv))
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func ParseMergedTextfile(fname string, mapping map[string]int) ([]bool, int, error) {
-	if CovMappingLength == 0 || CovMapping == nil {
-		return nil, 0, errors.New("coverage map has not been initialized")
-	}
-
-	result := make([]bool, CovMappingLength)
-
-	f, err := os.Open(fname)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	fn := ""
-	index := -1
-	counters := false
-	coveredBlocks := 0
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "" {
-			fn = ""
-			index = -1
-			counters = false
-			continue
-		}
-
-		if fn == "" {
-			fn = strings.TrimSpace(line)
-			if _, ok := mapping[fn]; !ok {
-				return nil, 0, errors.New("unknown function: " + fn)
-			}
-			index = mapping[fn]
-			continue
-		}
-
-		if strings.HasPrefix(line, "# Counter V") {
-			counters = true
-			continue
-		}
-
-		if counters {
-			executions, err := strconv.Atoi(line)
-			if err != nil {
-				return nil, 0, err
-			}
-			if executions > 0 {
-				result[index] = true
-				coveredBlocks += 1
-			}
-			index++
-		}
-	}
-	if err = scanner.Err(); err != nil {
-		return nil, 0, err
-	}
-
-	return result, coveredBlocks, nil
-}
+*/
