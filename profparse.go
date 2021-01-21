@@ -296,7 +296,7 @@ func GenCustomCovTxtFileFromProfdata(profdataFile string, instrumentedBinary str
 	cmd := exec.Command(llvmCovBinary, "report",
 		"--format=text",
 		"--instr-profile="+profdataFile, "-j="+strconv.Itoa(numThreads),
-		"--output", outfile, instrumentedBinary)
+		instrumentedBinary)
 
 	cmd.Stdout = f
 	cmd.Stderr = f
