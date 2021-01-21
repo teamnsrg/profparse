@@ -8,11 +8,20 @@ import (
 	log "github.com/sirupsen/logrus"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path"
 	"sort"
 	"strconv"
 	"strings"
 )
+
+type CodeRegion struct {
+	LineStart   int
+	ColumnStart int
+	LineEnd     int
+	ColumnEnd   int
+	FileID      int
+}
 
 /*
 func main() {
@@ -264,6 +273,42 @@ func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
 	return covMap, nil
 }
 
+func MergeProfraws(profraws []string, outfile string, profdataBinary string, numThreads int) error {
+	cmd := exec.Command(profdataBinary, append([]string{"merge",
+		"--failure-mode=any", "--num-threads=" + strconv.Itoa(numThreads),
+		"--output", outfile}, profraws...)...)
+
+	err := cmd.Run()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func GenCustomCovTxtFileFromProfdata(profdataFile string, instrumentedBinary string, outfile string, llvmCovBinary string, numThreads int) error {
+	f, err := os.Create(outfile)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	cmd := exec.Command(llvmCovBinary, "report",
+		"--format=text",
+		"--instr-profile="+profdataFile, "-j="+strconv.Itoa(numThreads),
+		"--output", outfile, instrumentedBinary)
+
+	cmd.Stdout = f
+	cmd.Stderr = f
+
+	err = cmd.Run()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func WriteCovMapToFile(fname string, covMap map[string]map[string][]bool) error {
 
 	f, err := os.Create(fname)
@@ -382,8 +427,6 @@ func boolsToBytes(t []bool) ([]byte, error) {
 	}
 
 	b = append(buf.Bytes(), b...)
-
-	log.Infof("Writing a file with %d bytes (%d + %d)", len(b), len(buf.Bytes()), (len(t)+7)/8)
 
 	return b, nil
 }
@@ -576,7 +619,7 @@ func ReadMapping(fname string) error {
 	return nil
 }
 
-func ReadFileMapping(fname string) error {
+func ReadCovMapping(fname string) error {
 	f, err := os.Open(fname)
 	if err != nil {
 		return err
@@ -656,113 +699,3 @@ func GetCovPathsMIDAResults(rootPath string) ([]string, error) {
 	}
 	return results, nil
 }
-
-/*
-
-// Builds a bit vector that is representative of the site's coverage. A site only
-// gets credit for covering a block if more than <threshold> percent of the crawls
-// covered that block. You may also set a minimum number of crawls for a site, and
-// this function will return an error if that minimum is not met.
-func BuildRepresentativeBV(sitePath string, threshold float64, minVisits int) ([]bool, error) {
-	paths, err := GetCovPathsSite(sitePath)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(paths) < minVisits {
-		return nil, errors.New("not enough site visits")
-	}
-
-	m := make(map[int]int)
-
-	// Build map containing total number of crawls which cover each block
-	for _, p := range paths {
-		bv, err := ReadFile(p)
-		if err != nil {
-			return nil, err
-		}
-
-		for i, val := range bv {
-			if _, ok := m[i]; !ok {
-				m[i] = 0
-			}
-
-			if val {
-				m[i] += 1
-			}
-		}
-	}
-
-	result := make([]bool, 0)
-	for i := 0; i < CovMappingLength; i++ {
-		if float64(m[i])/float64(len(paths)) >= threshold {
-			result = append(result, true)
-		} else {
-			result = append(result, false)
-		}
-	}
-
-	return result, nil
-}
-
-func ConvertProfrawsToCovFile(dir string, outputFile string, profdataBinary string) error {
-	files, err := ioutil.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-
-	bvs := make([][]bool, 0)
-	for _, cf := range files {
-		if !strings.HasSuffix(cf.Name(), "profraw") {
-			continue
-		}
-
-		fullCovFile := path.Join(dir, cf.Name())
-		cmd := exec.Command(profdataBinary, "show", "--counts", "--all-functions", fullCovFile)
-		newFileName := strings.ReplaceAll(cf.Name(), "profraw", "txt")
-		f, err := os.Create(path.Join(dir, newFileName))
-		if err != nil {
-			log.Error(err)
-			continue
-		}
-		writer := bufio.NewWriter(f)
-		cmd.Stdout = writer
-		cmd.Stderr = writer
-		err = cmd.Run()
-		if err != nil {
-			log.Warn(err, "  :  ", fullCovFile)
-			continue
-		}
-		err = writer.Flush()
-		if err != nil {
-			log.Error(err)
-			continue
-		}
-		err = f.Close()
-		if err != nil {
-			log.Error(err)
-			continue
-		}
-
-		fullReport := path.Join(dir, newFileName)
-		bv, totalBlocks, err := ParseFile(fullReport)
-		if err != nil {
-			log.Error(err, " (", fullReport, ")")
-			continue
-		}
-
-		log.Debugf("%d blocks for %s", totalBlocks, fullCovFile)
-
-		bvs = append(bvs, bv)
-	}
-
-	combinedBV, _, err := CombineBVs(bvs)
-	err = WriteFile(outputFile, combinedBV)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-*/
