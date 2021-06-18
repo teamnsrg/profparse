@@ -16,169 +16,14 @@ import (
 )
 
 type CodeRegion struct {
+	fileName    *string
+	funcName    *string
 	LineStart   int
 	ColumnStart int
 	LineEnd     int
 	ColumnEnd   int
 	FileID      int
 }
-
-/*
-func main() {
-	err := ReadMapping("mapping.csv")
-	if err != nil {
-		log.Error(err)
-		return
-	} else {
-		log.Info("Successfully read the mapping")
-		log.Infof("%d Functions", len(CovMapping))
-		log.Infof("%d Blocks", CovMappingLength)
-		log.Infof("Expecting bv files to be %d bytes", CovFileByteLength)
-	}
-
-	err = ReadFileMapping("file_mapping.csv")
-	if err != nil {
-		log.Error(err)
-		return
-	} else {
-		log.Info("Successfully read file mapping")
-	}
-
-	log.Info("Calculating number of blocks in each top level dir")
-	topLevelBlocks := make(map[string]int)
-	for s := range FileMapping {
-		topLevelDir := strings.Split(FileMapping[s], "/")[0]
-
-		if _, ok := topLevelBlocks[topLevelDir]; !ok {
-			topLevelBlocks[topLevelDir] = 0
-		}
-	}
-
-	for s := range CovMappingBlockCounts {
-		if _, ok := FileMapping[s]; !ok {
-			continue
-		}
-		topLevelDir := strings.Split(FileMapping[s], "/")[0]
-		topLevelBlocks[topLevelDir] += CovMappingBlockCounts[s]
-	}
-
-	COV_FILE_DIR := "covSamples"
-
-	files, err := ioutil.ReadDir(COV_FILE_DIR)
-	if err != nil {
-		log.Error(err)
-		return
-	}
-
-	blockCounts := make([]int, CovMappingLength)
-	bvs := make([][]bool,0)
-
-	log.Info("Loading bit vectors...")
-
-	for _, f := range files {
-		bv, err := ReadFile(path.Join(COV_FILE_DIR, f.Name()))
-		if err != nil {
-			log.Error(err)
-			return
-		}
-		for i, val := range bv {
-			if val {
-				blockCounts[i]++
-			}
-		}
-
-		bvs = append(bvs, bv)
-	}
-
-	log.Infof("Loaded %d bit vectors of coverage data", len(bvs))
-
-	nonZero := 0
-	all := 0
-	for _, count := range blockCounts {
-		if count > 0 {
-			nonZero++
-		}
-
-		if count == 300 {
-			all++
-		}
-	}
-
-	log.Infof("Altogether, these sites covered %d out of %d blocks (%f percent)",
-		nonZero, len(blockCounts), float64(nonZero) * 100.0 / float64(len(blockCounts)))
-	log.Infof("%d blocks were covered by every single run (%f percent)", all,
-		float64(all) * 100.0 / float64(len(blockCounts)))
-
-	totalBV, _, err := CombineBVs(bvs)
-	if err != nil {
-		log.Error(err)
-		return
-	}
-
-	topLevelCovered := make(map[string]int)
-	for k := range topLevelBlocks {
-		topLevelCovered[k] = 0
-	}
-
-	for symbol, fname := range FileMapping {
-		if _, ok := CovMappingBlockCounts[symbol]; !ok {
-			continue
-		}
-
-		numBlocks := CovMappingBlockCounts[symbol]
-		startBlock := CovMapping[symbol]
-		topLevelDir := strings.Split(fname, "/")[0]
-
-		for i := startBlock; i < startBlock + numBlocks; i++ {
-			if totalBV[i] {
-				topLevelCovered[topLevelDir]++
-			}
-		}
-	}
-
-	for k := range topLevelCovered {
-		fmt.Println(k, ":", topLevelCovered[k], "/", topLevelBlocks[k], "(", math.Round(float64(topLevelCovered[k]) / float64(topLevelBlocks[k]) * 100), "% )")
-	}
-
-
-}
-
-
-func MergeBVsThreshold(vectors [][]bool, threshold float64) ([]bool, error) {
-
-	// First check and make sure all have the proper length
-	for _, v := range vectors {
-		if v != nil && len(v) != CovMappingLength {
-			log.Error(len(v), " was an unexpected length for BV (expected: ", CovMappingLength, ")")
-			return nil, errors.New("improper length bv for combining")
-		}
-	}
-
-	if threshold > 1.0 || threshold < 0.0 {
-		return nil, errors.New("bad threshold")
-	}
-
-	counterBV := make([]int, CovMappingLength)
-	for _, bv := range vectors {
-		for i, bit := range bv {
-			if bit {
-				counterBV[i] += 1
-			}
-		}
-	}
-
-	var finalBV []bool
-	for _, val := range counterBV {
-		if float64(val)/float64(len(vectors)) > threshold {
-			finalBV = append(finalBV, true)
-		} else {
-			finalBV = append(finalBV, false)
-		}
-	}
-
-	return finalBV, nil
-}
-*/
 
 /*
 func CombineBVs(vectors [][]bool) ([]bool, int, error) {
@@ -272,6 +117,89 @@ func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
 
 	return covMap, nil
 }
+
+// Given the text output by our custom version of llvm-cov, create a metadata object that
+// allows us to reason about the bit vectors containing the coverage data
+func ReadCovMetadata(fname string) (map[string]map[string][]CodeRegion, error) {
+
+	f, err := os.Open(fname)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+
+	metaMap := make(map[string]map[string][]CodeRegion)
+	currentFile := ""
+	currentFunc := ""
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		pieces := strings.Split(strings.TrimSpace(line), " ")
+		if len(pieces) < 2 {
+			continue
+		}
+
+		if pieces[0] == "[FILE]" {
+			currentFile = pieces[1]
+			if _, ok := metaMap[currentFile]; !ok {
+				metaMap[currentFile] = make(map[string][]CodeRegion)
+			}
+		} else if pieces[0] == "[FUNCTION]" {
+			if currentFile == "" {
+				return nil, errors.New("function without a file")
+			}
+
+			currentFunc = pieces[1]
+			if _, ok := metaMap[currentFile][currentFunc]; !ok {
+				metaMap[currentFile][currentFunc] = make([]CodeRegion, 0)
+			}
+		} else if pieces[0] == "[BLOCK]" {
+			if currentFile == "" || currentFunc == "" {
+				return nil, errors.New("block without a function or file")
+			}
+
+			if len(pieces) != 5 {
+				return nil, errors.New("wrong number of pieces in BLOCK line")
+			}
+
+			var cr CodeRegion
+			cr.fileName = &currentFile
+			cr.funcName = &currentFunc
+
+			codeIndices := strings.Split(pieces[3], ",")
+			if len(codeIndices) != 4 {
+				return nil, errors.New("invalid line/column numbers")
+			}
+
+			cr.LineStart, err = strconv.Atoi(codeIndices[0])
+			if err != nil {
+				return nil, errors.New("invalid line/column numbers")
+			}
+
+			cr.ColumnStart, err = strconv.Atoi(codeIndices[1])
+			if err != nil {
+				return nil, errors.New("invalid line/column numbers")
+			}
+
+			cr.LineEnd, err = strconv.Atoi(codeIndices[2])
+			if err != nil {
+				return nil, errors.New("invalid line/column numbers")
+			}
+
+			cr.ColumnEnd, err = strconv.Atoi(codeIndices[3])
+			if err != nil {
+				return nil, errors.New("invalid line/column numbers")
+			}
+
+			metaMap[currentFile][currentFunc] = append(metaMap[currentFile][currentFunc], cr)
+
+		}
+	}
+	return metaMap, nil
+}
+
 
 func MergeProfraws(profraws []string, outfile string, profdataBinary string, numThreads int) error {
 	cmd := exec.Command(profdataBinary, append([]string{"merge",
