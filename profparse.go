@@ -499,196 +499,6 @@ func DiffTwoCovMaps(c1 map[string]map[string][]bool, c2 map[string]map[string][]
 	return d, nil
 }
 
-/*
-func ParseFile(fName string) ([]bool, int, error) {
-	if CovMappingLength == 0 || len(CovMapping) == 0 {
-		return nil, 0, errors.New("cov mapping uninitialized")
-	}
-
-	f, err := os.Open(fName)
-	if err != nil {
-		log.Error(err)
-	}
-
-	scanner := bufio.NewScanner(f)
-
-	bv := make([]bool, CovMappingLength) // Number of blocks that we get coverage data for
-
-	currentFunc := ""
-	currentIndex := -1
-
-	checker := make(map[int]bool)
-	goodFile := false
-
-	lineNum := 0
-
-	blocksCovered := 0
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		lineNum += 1
-		if strings.HasPrefix(line, "Instrumentation level") {
-			goodFile = true
-			break
-		}
-
-		if strings.HasPrefix(line, "Hash:") {
-
-		} else if strings.HasPrefix(line, "Counters") {
-
-		} else if strings.HasPrefix(line, "Block counts:") {
-			arr := strings.TrimSuffix(strings.TrimPrefix(line, "Block counts: ["), "]")
-			if arr == "" {
-				continue
-			}
-
-			blocks := strings.Split(arr, ", ")
-			for bIndex, bValStr := range blocks {
-				bVal, err := strconv.Atoi(bValStr)
-				if err != nil {
-					log.Error("Error converting block counter to int")
-					log.Error(line)
-				}
-
-				bv[currentIndex+1+bIndex] = bVal != 0
-				if bVal != 0 {
-					blocksCovered += 1
-				}
-				checker[currentIndex+1+bIndex] = true
-			}
-
-		} else if strings.HasPrefix(line, "Function count:") {
-			parts := strings.Split(line, " ")
-			if len(parts) != 3 {
-				log.Error("Bad function count line")
-				log.Error(line)
-			}
-			fCount, err := strconv.Atoi(parts[2])
-			if err != nil {
-				log.Error("Atoi error in function count")
-				log.Error(line)
-			}
-
-			bv[currentIndex] = fCount != 0
-			if fCount != 0 {
-				blocksCovered += 1
-			}
-
-			checker[currentIndex] = true
-		} else {
-			parts := strings.Split(line, " ")
-			if len(parts) != 1 {
-				log.Error(fName)
-				log.Error(line)
-				return nil, 0, errors.New("found function line without two parts")
-			}
-			currentFunc = strings.TrimSuffix(parts[0], ":")
-
-			if _, ok := CovMapping[currentFunc]; !ok {
-				log.WithFields(log.Fields{"function": currentFunc, "line": lineNum, "file": fName}).Warn("Missing function")
-				currentIndex = -1
-			} else {
-				currentIndex = CovMapping[currentFunc]
-			}
-		}
-	}
-
-	if !goodFile {
-		return nil, 0, errors.New("appears to be a badly formatted file")
-	}
-
-	mismatches := 0
-	for i := 0; i < CovMappingLength; i++ {
-		if _, ok := checker[i]; !ok {
-			mismatches += 1
-		}
-	}
-
-	if mismatches != 0 {
-		return nil, 0, errors.New("found mismatches: " + strconv.Itoa(mismatches))
-	}
-
-	return bv, blocksCovered, nil
-}
-
-*/
-
-/*
-
-// Reads the mapping file and returns the corresponding map structure
-func ReadMapping(fname string) error {
-	f, err := os.Open(fname)
-	if err != nil {
-		log.Error(err)
-	}
-
-	reader := csv.NewReader(f)
-
-	CovMapping = make(map[string]int)
-	CovMappingBlockCounts = make(map[string]int)
-
-	prevSymbol := ""
-	prevIndex := 0
-
-	for {
-		row, err := reader.Read()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return err
-		}
-
-		index, err := strconv.Atoi(row[1])
-		if err != nil {
-			return err
-		}
-
-		if row[0] == "END" {
-			CovMappingLength = index
-		} else {
-			CovMapping[row[0]] = index
-		}
-
-		CovMappingBlockCounts[prevSymbol] = index - prevIndex
-		prevSymbol = row[0]
-		prevIndex = index
-	}
-
-	if CovMappingLength%8 == 0 {
-		CovFileByteLength = CovMappingLength / 8
-	} else {
-		CovFileByteLength = CovMappingLength/8 + 1
-	}
-
-	return nil
-}
-
-func ReadCovMapping(fname string) error {
-	f, err := os.Open(fname)
-	if err != nil {
-		return err
-	}
-
-	reader := csv.NewReader(f)
-
-	FileMapping = make(map[string]string)
-
-	for {
-		row, err := reader.Read()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return err
-		}
-
-		FileMapping[row[0]] = row[1]
-	}
-
-	return nil
-}
-
-*/
-
 func GetCovPathCrawl(crawlPath string) (string, error) {
 	covPath := path.Join(crawlPath, "coverage", "coverage.bv")
 	if _, err := os.Stat(covPath); os.IsNotExist(err) {
@@ -742,4 +552,35 @@ func GetCovPathsMIDAResults(rootPath string) ([]string, error) {
 		results = append(results, paths...)
 	}
 	return results, nil
+}
+
+// GetMedianBV given a vector of bit vectors, returns a single bit vector best representative of
+// that group through simple median
+func GetMedianBV(vectors [][]bool) ([]bool, error) {
+	if len(vectors) <= 0 {
+		return nil, errors.New("no bit vectors passed to GetMedianBV()")
+	}
+
+	expectedLength := len(vectors[0])
+	if expectedLength == 0 {
+		return nil, errors.New("zero length vector in GetMedianBV()")
+	}
+
+	finalBV := make([]bool, len(vectors[0]))
+	for i := range vectors[0] {
+		count := 0
+		for j := range vectors {
+			if vectors[j][i] {
+				count += 1
+			}
+		}
+
+		if float64(count) >= float64(len(vectors))/2.0 {
+			finalBV[i] = true
+		} else {
+			finalBV[i] = false
+		}
+	}
+
+	return finalBV, nil
 }
