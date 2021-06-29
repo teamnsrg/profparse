@@ -80,6 +80,9 @@ func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
 
 		if pieces[0] == "[FILE]" {
 			currentFile = pieces[1]
+			if strings.HasPrefix(currentFile, "/home/pmurley/chromium/src/out/chrome_91_cov_unstripped") {
+				currentFile = currentFile[56:]
+			}
 			if _, ok := covMap[currentFile]; !ok {
 				covMap[currentFile] = make(map[string][]bool)
 			}
@@ -118,7 +121,7 @@ func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
 	return covMap, nil
 }
 
-// Given the text output by our custom version of llvm-cov, create a metadata object that
+// ReadCovMetadata given the text output by our custom version of llvm-cov, create a metadata object that
 // allows us to reason about the bit vectors containing the coverage data
 func ReadCovMetadata(fname string) (map[string]map[string][]CodeRegion, error) {
 
@@ -143,6 +146,9 @@ func ReadCovMetadata(fname string) (map[string]map[string][]CodeRegion, error) {
 
 		if pieces[0] == "[FILE]" {
 			currentFile = pieces[1]
+			if strings.HasPrefix(currentFile, "/home/pmurley/chromium/src/out/chrome_91_cov_unstripped") {
+				currentFile = currentFile[56:]
+			}
 			if _, ok := metaMap[currentFile]; !ok {
 				metaMap[currentFile] = make(map[string][]CodeRegion)
 			}
@@ -200,6 +206,19 @@ func ReadCovMetadata(fname string) (map[string]map[string][]CodeRegion, error) {
 	return metaMap, nil
 }
 
+func ConvertCovMapToStructure(covMap map[string]map[string][]bool) map[string]map[string]int {
+	structure := make(map[string]map[string]int)
+
+	for fileName := range covMap {
+		structure[fileName] = make(map[string]int)
+		for funcName := range covMap[fileName] {
+			structure[fileName][funcName] = len(covMap[fileName][funcName])
+		}
+
+	}
+
+	return structure
+}
 
 func MergeProfraws(profraws []string, outfile string, profdataBinary string, numThreads int) error {
 	cmd := exec.Command(profdataBinary, append([]string{"merge",
@@ -340,6 +359,41 @@ func ConvertCovMapToBools(covMap map[string]map[string][]bool) []bool {
 	return bools
 }
 
+func ConvertBoolsToCovMap(bools []bool, structure map[string]map[string]int) (map[string]map[string][]bool, error) {
+	covMap := make(map[string]map[string][]bool)
+
+	fileNames := make([]string, 0, len(structure))
+
+	for k := range structure {
+		fileNames = append(fileNames, k)
+	}
+	sort.Strings(fileNames)
+
+	currentIndex := 0
+
+	for _, fileName := range fileNames {
+
+		covMap[fileName] = make(map[string][]bool)
+
+		funcNames := make([]string, 0)
+		for k := range structure[fileName] {
+			funcNames = append(funcNames, k)
+		}
+
+		sort.Strings(funcNames)
+
+		for _, funcName := range funcNames {
+			covMap[fileName][funcName] = make([]bool, structure[fileName][funcName])
+			for i := 0; i < structure[fileName][funcName]; i++ {
+				covMap[fileName][funcName][i] = bools[currentIndex]
+				currentIndex += 1
+			}
+		}
+	}
+
+	return covMap, nil
+}
+
 func boolsToBytes(t []bool) ([]byte, error) {
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, binary.LittleEndian, uint32(len(t)))
@@ -381,6 +435,68 @@ func bytesToBools(b []byte) ([]bool, error) {
 		}
 	}
 	return t, nil
+}
+
+type Diff struct {
+	TotalRegions      int
+	TotalCovered      int
+	FirstCovered      int
+	SecondCovered     int
+	FirstOnlyCovered  int
+	SecondOnlyCovered int
+	Same              int
+	Different         int
+}
+
+func DiffTwoCovMaps(c1 map[string]map[string][]bool, c2 map[string]map[string][]bool, filePrefix string) (Diff, error) {
+	var d Diff
+
+	for fileName := range c1 {
+		if !strings.HasPrefix(fileName, filePrefix) {
+			continue
+		}
+
+		if _, ok := c2[fileName]; !ok {
+			return d, errors.New("mismatched covmaps")
+		}
+
+		for funcName := range c1[fileName] {
+			if _, ok := c2[fileName][funcName]; !ok {
+				return d, errors.New("mismatched covmaps")
+			}
+
+			d.TotalRegions += len(c1[fileName][funcName])
+
+			for i, val1 := range c1[fileName][funcName] {
+				val2 := c2[fileName][funcName][i]
+
+				if val1 && val2 {
+					d.FirstCovered += 1
+					d.SecondCovered += 1
+					d.Same += 1
+					d.TotalCovered += 1
+
+				} else if val1 && !val2 {
+					d.FirstCovered += 1
+					d.FirstOnlyCovered += 1
+					d.Different += 1
+					d.TotalCovered += 1
+
+				} else if !val1 && val2 {
+					d.SecondCovered += 1
+					d.SecondOnlyCovered += 1
+					d.Different += 1
+					d.TotalCovered += 1
+
+				} else if !val1 && !val2 {
+					d.Same += 1
+				}
+			}
+		}
+
+	}
+
+	return d, nil
 }
 
 /*
