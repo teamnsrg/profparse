@@ -437,7 +437,7 @@ func bytesToBools(b []byte) ([]bool, error) {
 	return t, nil
 }
 
-type Diff struct {
+type CovMapDiff struct {
 	TotalRegions      int
 	TotalCovered      int
 	FirstCovered      int
@@ -448,8 +448,23 @@ type Diff struct {
 	Different         int
 }
 
-func DiffTwoCovMaps(c1 map[string]map[string][]bool, c2 map[string]map[string][]bool, filePrefix string) (Diff, error) {
-	var d Diff
+func DiffTwoBVs(bv1 []bool, bv2 []bool) (int, error) {
+	if len(bv1) != len(bv2) {
+		return 0, errors.New("bv lengths do not match")
+	}
+
+	diff := 0
+	for i := range bv1 {
+		if bv1[i] != bv2[i] {
+			diff += 1
+		}
+	}
+
+	return diff, nil
+}
+
+func DiffTwoCovMaps(c1 map[string]map[string][]bool, c2 map[string]map[string][]bool, filePrefix string) (CovMapDiff, error) {
+	var d CovMapDiff
 
 	for fileName := range c1 {
 		if !strings.HasPrefix(fileName, filePrefix) {
