@@ -40,7 +40,7 @@ func main() {
 	bvMap = make(map[string][]bool)
 	nrMap = make(map[string]int)
 
-	for _, covPath := range covPaths {
+	for i, covPath := range covPaths {
 		bv, err := pp.ReadBVFileToBV(covPath)
 		if err != nil {
 			log.Error(err)
@@ -61,8 +61,9 @@ func main() {
 		}
 
 		nrMap[covPath] = meta.NumResources
-
 		bvMap[covPath] = bv
+
+		log.Infof("loaded %d", i)
 	}
 
 	taskChan := make(chan Task, 10000)
