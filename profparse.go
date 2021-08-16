@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,13 +26,12 @@ type CodeRegion struct {
 	FileID      int
 }
 
-/*
 func CombineBVs(vectors [][]bool) ([]bool, int, error) {
-	bv := make([]bool, CovMappingLength)
+	bv := make([]bool, 0)
 
 	// First check and make sure all have the proper length
 	for _, v := range vectors {
-		if v != nil && len(v) != CovMappingLength {
+		if len(v) < 2 {
 			return nil, 0, errors.New("improper length bv for combining")
 		}
 	}
@@ -55,7 +55,6 @@ func CombineBVs(vectors [][]bool) ([]bool, int, error) {
 	return bv, totalBlocks, nil
 
 }
-*/
 
 func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
 
@@ -394,6 +393,43 @@ func ConvertBoolsToCovMap(bools []bool, structure map[string]map[string]int) (ma
 	return covMap, nil
 }
 
+func GenerateBVIndexToCodeRegionMap(structure map[string]map[string]int, metadata map[string]map[string][]CodeRegion) map[int]CodeRegion {
+	covMap := make(map[string]map[string][]bool)
+
+	fileNames := make([]string, 0, len(structure))
+
+	for k := range structure {
+		fileNames = append(fileNames, k)
+	}
+	sort.Strings(fileNames)
+
+	currentIndex := 0
+
+	codeRegionMap := make(map[int]CodeRegion)
+
+	for _, fileName := range fileNames {
+
+		covMap[fileName] = make(map[string][]bool)
+
+		funcNames := make([]string, 0)
+		for k := range structure[fileName] {
+			funcNames = append(funcNames, k)
+		}
+
+		sort.Strings(funcNames)
+
+		for _, funcName := range funcNames {
+			covMap[fileName][funcName] = make([]bool, structure[fileName][funcName])
+			for i := 0; i < structure[fileName][funcName]; i++ {
+				codeRegionMap[currentIndex] = metadata[fileName][funcName][i]
+				currentIndex += 1
+			}
+		}
+	}
+
+	return codeRegionMap
+}
+
 func boolsToBytes(t []bool) ([]byte, error) {
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, binary.LittleEndian, uint32(len(t)))
@@ -567,6 +603,38 @@ func GetCovPathsMIDAResults(rootPath string) ([]string, error) {
 		results = append(results, paths...)
 	}
 	return results, nil
+}
+
+func GetIndicesForMatchingFiles(re regexp.Regexp, structure map[string]map[string]int) []int {
+
+	indices := make([]int, 0)
+
+	matches := false
+
+	fileNames := make([]string, 0, len(structure))
+	for k := range structure {
+		fileNames = append(fileNames, k)
+	}
+	sort.Strings(fileNames)
+
+	counter := 0
+	for _, filename := range fileNames {
+		if re.MatchString(filename) {
+			matches = true
+
+		} else {
+			matches = false
+		}
+
+		for range structure[filename] {
+			if matches {
+				indices = append(indices, counter)
+			}
+			counter += 1
+		}
+	}
+
+	return indices
 }
 
 // GetMedianBV given a vector of bit vectors, returns a single bit vector best representative of
