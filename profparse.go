@@ -79,8 +79,8 @@ func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
 
 		if pieces[0] == "[FILE]" {
 			currentFile = pieces[1]
-			if strings.HasPrefix(currentFile, "/home/pmurley/chromium/src/out/chrome_91_cov_unstripped") {
-				currentFile = currentFile[56:]
+			if strings.HasPrefix(currentFile, "/home/pmurley/chromium/src/out/chrome_cov_unstripped") {
+				currentFile = currentFile[53:]
 			}
 			if _, ok := covMap[currentFile]; !ok {
 				covMap[currentFile] = make(map[string][]bool)
@@ -145,8 +145,8 @@ func ReadCovMetadata(fname string) (map[string]map[string][]CodeRegion, error) {
 
 		if pieces[0] == "[FILE]" {
 			currentFile = pieces[1]
-			if strings.HasPrefix(currentFile, "/home/pmurley/chromium/src/out/chrome_91_cov_unstripped") {
-				currentFile = currentFile[56:]
+			if strings.HasPrefix(currentFile, "/home/pmurley/chromium/src/out/chrome_cov_unstripped") {
+				currentFile = currentFile[53:]
 			}
 			if _, ok := metaMap[currentFile]; !ok {
 				metaMap[currentFile] = make(map[string][]CodeRegion)
