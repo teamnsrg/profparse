@@ -17,8 +17,8 @@ import (
 )
 
 type CodeRegion struct {
-	fileName    *string
-	funcName    *string
+	FileName    *string
+	FuncName    *string
 	LineStart   int
 	ColumnStart int
 	LineEnd     int
@@ -70,6 +70,10 @@ func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
 	currentFile := ""
 	currentFunc := ""
 
+	totalRegions := 0
+	coveredRegions := 0
+	totalFiles := 0
+	totalFuncs := 0
 	for scanner.Scan() {
 		line := scanner.Text()
 		pieces := strings.Split(strings.TrimSpace(line), " ")
@@ -85,6 +89,8 @@ func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
 			if _, ok := covMap[currentFile]; !ok {
 				covMap[currentFile] = make(map[string][]bool)
 			}
+
+			totalFiles += 1
 		} else if pieces[0] == "[FUNCTION]" {
 			if currentFile == "" {
 				return nil, errors.New("function without a file")
@@ -94,6 +100,8 @@ func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
 			if _, ok := covMap[currentFile][currentFunc]; !ok {
 				covMap[currentFile][currentFunc] = make([]bool, 0)
 			}
+
+			totalFuncs += 1
 		} else if pieces[0] == "[BLOCK]" {
 			if currentFile == "" || currentFunc == "" {
 				return nil, errors.New("block without a function or file")
@@ -108,7 +116,11 @@ func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
 				return nil, err
 			}
 
+			totalRegions += 1
+
 			if executions != 0 {
+				coveredRegions += 1
+
 				covMap[currentFile][currentFunc] = append(covMap[currentFile][currentFunc], true)
 			} else {
 				covMap[currentFile][currentFunc] = append(covMap[currentFile][currentFunc], false)
@@ -170,8 +182,8 @@ func ReadCovMetadata(fname string) (map[string]map[string][]CodeRegion, error) {
 			}
 
 			var cr CodeRegion
-			cr.fileName = &currentFile
-			cr.funcName = &currentFunc
+			cr.FileName = &currentFile
+			cr.FuncName = &currentFunc
 
 			codeIndices := strings.Split(pieces[3], ",")
 			if len(codeIndices) != 4 {
@@ -586,7 +598,7 @@ func GetCovPathsSite(sitePath string) ([]string, error) {
 
 // Given the path to a MIDA crawl results directory, returns a slice of strings containing
 // the paths to all of the coverage (.cov) files contained in it
-func GetCovPathsMIDAResults(rootPath string) ([]string, error) {
+func GetCovPathsMIDAResults(rootPath string, onePerSite bool) ([]string, error) {
 	results := make([]string, 0)
 
 	dirs, err := ioutil.ReadDir(rootPath)
@@ -599,6 +611,9 @@ func GetCovPathsMIDAResults(rootPath string) ([]string, error) {
 		if err != nil {
 			log.Error(err)
 			continue
+		}
+		if onePerSite {
+			paths = paths[len(paths)-1:]
 		}
 		results = append(results, paths...)
 	}
