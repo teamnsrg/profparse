@@ -114,7 +114,7 @@ func main() {
 	log.Infof("  - Total Functions: %d", functions)
 	log.Infof("  - Total Code Regions: %d\n", regions)
 
-	covPaths, err := pp.GetCovPathsMIDAResults(resultsPath)
+	covPaths, err := pp.GetCovPathsMIDAResults(resultsPath, false)
 	if err != nil {
 		log.Fatal(err)
 	}

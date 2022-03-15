@@ -175,8 +175,8 @@ func main() {
 	for i, val := range regionCoverage {
 		codeRegion := BVIndexToCodeRegionMap[i]
 		writer.Write([]string{
-			*codeRegion.FileName,
-			*codeRegion.FuncName,
+			codeRegion.FileName,
+			codeRegion.FuncName,
 			strconv.Itoa(i),
 			strconv.Itoa(val),
 			strconv.FormatFloat(float64(val)/float64(numTrials), 'f', 4, 64),

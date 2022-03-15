@@ -17,8 +17,8 @@ import (
 )
 
 type CodeRegion struct {
-	FileName    *string
-	FuncName    *string
+	FileName    string
+	FuncName    string
 	LineStart   int
 	ColumnStart int
 	LineEnd     int
@@ -182,8 +182,8 @@ func ReadCovMetadata(fname string) (map[string]map[string][]CodeRegion, error) {
 			}
 
 			var cr CodeRegion
-			cr.FileName = &currentFile
-			cr.FuncName = &currentFunc
+			cr.FileName = currentFile
+			cr.FuncName = currentFunc
 
 			codeIndices := strings.Split(pieces[3], ",")
 			if len(codeIndices) != 4 {
