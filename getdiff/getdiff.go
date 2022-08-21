@@ -30,7 +30,7 @@ func main() {
 	resultsPath := "/home/pmurley/go/src/github.com/teamnsrg/profparse/91-100-of-10k"
 
 	log.SetReportCaller(true)
-	covPaths, err := pp.GetCovPathsMIDAResults(resultsPath)
+	covPaths, err := pp.GetCovPathsMIDAResults(resultsPath, true)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	log "github.com/sirupsen/logrus"
+	b "github.com/teamnsrg/mida/base"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -681,4 +683,56 @@ func GetMedianBV(vectors [][]bool) ([]bool, error) {
 	}
 
 	return finalBV, nil
+}
+
+func ConvertFileCoverageToTree(fc map[string]int) map[string]int {
+	tree := make(map[string]int)
+	for k, v := range fc {
+		parts := strings.Split(k, "/")
+		if parts[0] == ".." && parts[1] == ".." {
+			parts = parts[2:]
+		} else if parts[0] == "gen" {
+			parts = parts[1:]
+		}
+
+		for i := 0; i < len(parts); i++ {
+			seg := strings.Join(parts[:i+1], "/")
+			if _, ok := tree[seg]; !ok {
+				tree[seg] = 0
+			}
+			tree[seg] += v
+		}
+	}
+
+	return tree
+}
+
+func LoadMidaMetadata(filename string) (b.TaskSummary, error) {
+	jsonBytes, err := os.ReadFile(filename)
+	if err != nil {
+		return b.TaskSummary{}, err
+	}
+
+	var metadata b.TaskSummary
+	err = json.Unmarshal(jsonBytes, &metadata)
+	if err != nil {
+		return b.TaskSummary{}, err
+	}
+
+	return metadata, nil
+}
+
+func LoadMidaResourceData(filename string) (map[string]b.DTResource, error) {
+	jsonBytes, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	var resourceData map[string]b.DTResource
+	err = json.Unmarshal(jsonBytes, &resourceData)
+	if err != nil {
+		return nil, err
+	}
+
+	return resourceData, nil
 }
