@@ -32,6 +32,11 @@ func GetTreeSummary(covMap map[string]map[string][]bool, level int) map[string]C
 		}
 
 		parts := strings.Split(fileName, "/")
+		if parts[0] == ".." && parts[1] == ".." {
+			parts = parts[2:]
+		} else if parts[0] == "gen" {
+			parts = parts[1:]
+		}
 		for i := 0; i < len(parts) && (level <= 0 || i < level-1); i++ {
 			seg := strings.Join(parts[:i+1], "/")
 			if _, ok := tree[seg]; !ok {
