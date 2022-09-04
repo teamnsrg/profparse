@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func GetTreeSummary(covMap map[string]map[string][]bool) map[string]CovSummary {
+func GetTreeSummary(covMap map[string]map[string][]bool, level int) map[string]CovSummary {
 	tree := make(map[string]CovSummary)
 	for fileName := range covMap {
 		totalRegionsInFile := 0
@@ -32,7 +32,7 @@ func GetTreeSummary(covMap map[string]map[string][]bool) map[string]CovSummary {
 		}
 
 		parts := strings.Split(fileName, "/")
-		for i := 0; i < len(parts); i++ {
+		for i := 0; i < len(parts) && (level <= 0 || i < level-1); i++ {
 			seg := strings.Join(parts[:i+1], "/")
 			if _, ok := tree[seg]; !ok {
 				tree[seg] = CovSummary{
