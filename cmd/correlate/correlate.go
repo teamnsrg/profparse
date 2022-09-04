@@ -23,13 +23,17 @@ type Result struct {
 	Path                         string // Done
 	Domain                       string // Done
 	Category                     string
-	Success                      bool    // Done
-	TotalResources               int     // Done
-	TotalBlocksCovered           int64   // Done
-	TotalResourceBytesDownloaded int64   // Done
-	LoadEvent                    bool    // Done
-	LoadEventTime                float64 // Done
-	BrowserOpenTime              float64 // Done
+	Success                      bool             // Done
+	TotalResources               int              // Done
+	TotalBlocksCovered           int64            // Done
+	TotalResourceBytesDownloaded int64            // Done
+	LoadEvent                    bool             // Done
+	LoadEventTime                float64          // Done
+	BrowserOpenTime              float64          // Done
+	GenBlocksCovered             int64            // Done
+	SrcBlocksCovered             int64            // Done
+	DirBlocksCovered             map[string]int64 // Done
+	PercentDirBlocksCovered      map[string]float64
 }
 
 type BVRange struct {
@@ -67,10 +71,74 @@ var FileCovCountLock sync.Mutex
 
 var SiteCats map[string]CloudflareCategoryEntry
 
+var ExcludeVector []bool
+
+//var DirectoriesOfInterest = []string{
+//	"third_party/blink",
+//	"android_webview",
+//	"apps",
+//	"ash",
+//	"base",
+//	"build",
+//	"cc",
+//	"chrome",
+//	"chromecast",
+//	"chromeos",
+//	"cloud_print",
+//	"codelabs",
+//	"components",
+//	"content",
+//	"courgette",
+//	"crypto",
+//	"dbus",
+//	"device",
+//	"docs",
+//	"extensions",
+//	"fuchsia",
+//	"gin",
+//	"google_apis",
+//	"google_update",
+//	"gpu",
+//	"headless",
+//	"infra",
+//	"ios",
+//	"ipc",
+//	"jingle",
+//	"media",
+//	"mojo",
+//	"native_client",
+//	"native_client_sdk",
+//	"net",
+//	"out",
+//	"pdf",
+//	"ppapi",
+//	"printing",
+//	"remoting",
+//	"rlz",
+//	"sandbox",
+//	"services",
+//	"skia",
+//	"sql",
+//	"storage",
+//	"styleguide",
+//	"testing",
+//	"third_party",
+//	"tools",
+//	"ui",
+//	"url",
+//	"v8",
+//	"weblayer",
+//}
+
+var DirectoriesOfInterest = []string{
+	"net/websockets",
+}
+
 func main() {
 	var covFile string
 	var resultsPath string
 	var outfile string
+	var excludeBVFile string
 
 	flag.StringVar(&covFile, "coverage-file", "coverage.txt",
 		"Path to sample text coverage file for metadata generation")
@@ -78,6 +146,8 @@ func main() {
 		"Path to MIDA results for analysis")
 	flag.StringVar(&outfile, "out", "file_coverage.csv",
 		"Path to output file csv")
+	flag.StringVar(&excludeBVFile, "excludeBV", "",
+		"BV file to exlcude set regions from analysis")
 
 	flag.Parse()
 
@@ -110,7 +180,19 @@ func main() {
 	functions := 0
 	regions := 0
 
-	// sampleBV := pp.ConvertCovMapToBools(sampleCovMap)
+	sampleBV := pp.ConvertCovMapToBools(sampleCovMap)
+
+	log.Info("Reading BV to exclude")
+	if excludeBVFile != "" {
+		ExcludeVector, err = pp.ReadBVFileToBV(excludeBVFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Infof("Read exclude vector (length: %d)", len(ExcludeVector))
+	} else {
+		ExcludeVector = make([]bool, len(sampleBV))
+		log.Infof("Created empty exclude vector (length: %d)", len(ExcludeVector))
+	}
 
 	Structure = pp.ConvertCovMapToStructure(sampleCovMap)
 	for _, v1 := range Structure {
@@ -235,10 +317,51 @@ func worker(taskChan chan Task, resultChan chan Result, wg *sync.WaitGroup) {
 		}
 
 		var blocksCovered int64 = 0
+		var genBlocksCovered int64 = 0
+		var srcBlocksCovered int64 = 0
+
+		totalBlocksPerDir := make(map[string]int64)
+		coveredBlocksPerDir := make(map[string]int64)
+
+		for _, dir := range DirectoriesOfInterest {
+			totalBlocksPerDir[dir] = 0
+			coveredBlocksPerDir[dir] = 0
+		}
+
 		for _, fileName := range SortedFiles {
+			isGen := strings.HasPrefix(fileName, "gen/")
+			isSrc := strings.HasPrefix(fileName, "../../")
+
+			isDirMap := make(map[string]bool)
+			for _, dir := range DirectoriesOfInterest {
+				if strings.HasPrefix(fileName, "gen/"+dir) || strings.HasPrefix(fileName, "../../"+dir) {
+					isDirMap[dir] = true
+				} else {
+					isDirMap[dir] = false
+				}
+			}
+
 			indices := FilenameToBVIndices[fileName]
 			fileCov := 0
 			for i := indices.Start; i < indices.End; i++ {
+				//if ExcludeVector[i] {
+				//	continue
+				//}
+				for _, dir := range DirectoriesOfInterest {
+					if isDirMap[dir] {
+						totalBlocksPerDir[dir] += 1
+						if bv[i] {
+							coveredBlocksPerDir[dir] += 1
+							if isGen {
+								genBlocksCovered += 1
+							}
+							if isSrc {
+								srcBlocksCovered += 1
+							}
+						}
+					}
+				}
+
 				if bv[i] {
 					fileCov += 1
 					blocksCovered += 1
@@ -266,7 +389,7 @@ func worker(taskChan chan Task, resultChan chan Result, wg *sync.WaitGroup) {
 		r.Success = metadata.Success
 		r.TotalResources = metadata.NumResources
 		r.TotalResourceBytesDownloaded = dirSize
-		r.TotalBlocksCovered = blocksCovered
+
 		r.BrowserOpenTime = totalTimeBrowserOpen
 		if loadEventTime.Year() == 2022 {
 			r.LoadEvent = true
@@ -278,9 +401,21 @@ func worker(taskChan chan Task, resultChan chan Result, wg *sync.WaitGroup) {
 		if data, ok := SiteCats[domain]; ok && len(data.ContentCategories) == 1 {
 			r.Category = data.ContentCategories[0].Name
 		} else if len(data.ContentCategories) > 1 {
-			r.Category = "MULTIPLE"
+			r.Category = data.ContentCategories[0].Name
 		} else {
 			r.Category = "UNKNOWN"
+		}
+
+		r.TotalBlocksCovered = blocksCovered
+		r.GenBlocksCovered = genBlocksCovered
+		r.SrcBlocksCovered = srcBlocksCovered
+		r.DirBlocksCovered = coveredBlocksPerDir
+
+		r.PercentDirBlocksCovered = make(map[string]float64)
+		for _, dir := range DirectoriesOfInterest {
+			r.PercentDirBlocksCovered[dir] = float64(r.DirBlocksCovered[dir]) / float64(totalBlocksPerDir[dir])
+			log.Infof("Dir: %s, Covered: %d, Total: %d, Percent: %.02f", dir,
+				r.DirBlocksCovered[dir], totalBlocksPerDir[dir], float64(r.DirBlocksCovered[dir])/float64(totalBlocksPerDir[dir]))
 		}
 
 		resultChan <- r
@@ -311,12 +446,19 @@ func writer(resultChan chan Result, wwg *sync.WaitGroup, outfile string) {
 		"Total Resources",
 		"Total Resource Bytes",
 		"Total Blocks Covered",
+		"Gen Blocks Covered",
+		"Src Blocks Covered",
+	}
+
+	for _, dir := range DirectoriesOfInterest {
+		header = append(header, "RegionsCovered: "+dir)
+		header = append(header, "PercentCovered: "+dir)
 	}
 
 	writer.Write(header)
 
 	for result := range resultChan {
-		writer.Write([]string{
+		line := []string{
 			result.Domain,
 			result.Path,
 			result.Category,
@@ -327,7 +469,16 @@ func writer(resultChan chan Result, wwg *sync.WaitGroup, outfile string) {
 			strconv.Itoa(result.TotalResources),
 			strconv.FormatInt(result.TotalResourceBytesDownloaded, 10),
 			strconv.FormatInt(result.TotalBlocksCovered, 10),
-		})
+			strconv.FormatInt(result.GenBlocksCovered, 10),
+			strconv.FormatInt(result.SrcBlocksCovered, 10),
+		}
+
+		for _, dir := range DirectoriesOfInterest {
+			line = append(line, strconv.FormatInt(result.DirBlocksCovered[dir], 10))
+			line = append(line, strconv.FormatFloat(result.PercentDirBlocksCovered[dir], 'f', 4, 64))
+		}
+
+		writer.Write(line)
 		writer.Flush()
 	}
 	f.Close()

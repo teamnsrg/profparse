@@ -28,8 +28,14 @@ type CodeRegion struct {
 	FileID      int
 }
 
+type CovSummary struct {
+	TotalRegions   int
+	CoveredRegions int
+	PercentCovered float64
+}
+
 func CombineBVs(vectors [][]bool) ([]bool, int, error) {
-	bv := make([]bool, 0)
+	bv := make([]bool, len(vectors[0]))
 
 	// First check and make sure all have the proper length
 	for _, v := range vectors {
@@ -40,7 +46,7 @@ func CombineBVs(vectors [][]bool) ([]bool, int, error) {
 
 	totalBlocks := 0
 
-	for i := range bv {
+	for i := range vectors[0] {
 		bv[i] = false
 		for j := range vectors {
 			if vectors[j] == nil {
@@ -85,9 +91,6 @@ func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
 
 		if pieces[0] == "[FILE]" {
 			currentFile = pieces[1]
-			if strings.HasPrefix(currentFile, "/home/pmurley/chromium/src/out/chrome_cov_unstripped") {
-				currentFile = currentFile[53:]
-			}
 			if _, ok := covMap[currentFile]; !ok {
 				covMap[currentFile] = make(map[string][]bool)
 			}
@@ -683,28 +686,6 @@ func GetMedianBV(vectors [][]bool) ([]bool, error) {
 	}
 
 	return finalBV, nil
-}
-
-func ConvertFileCoverageToTree(fc map[string]int) map[string]int {
-	tree := make(map[string]int)
-	for k, v := range fc {
-		parts := strings.Split(k, "/")
-		if parts[0] == ".." && parts[1] == ".." {
-			parts = parts[2:]
-		} else if parts[0] == "gen" {
-			parts = parts[1:]
-		}
-
-		for i := 0; i < len(parts); i++ {
-			seg := strings.Join(parts[:i+1], "/")
-			if _, ok := tree[seg]; !ok {
-				tree[seg] = 0
-			}
-			tree[seg] += v
-		}
-	}
-
-	return tree
 }
 
 func LoadMidaMetadata(filename string) (b.TaskSummary, error) {
