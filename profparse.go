@@ -34,6 +34,12 @@ type CovSummary struct {
 	PercentCovered float64
 }
 
+type CovMapProperties struct {
+	NumFiles     int
+	NumFunctions int
+	NumRegions   int
+}
+
 func CombineBVs(vectors [][]bool) ([]bool, int, error) {
 	bv := make([]bool, len(vectors[0]))
 
@@ -64,11 +70,11 @@ func CombineBVs(vectors [][]bool) ([]bool, int, error) {
 
 }
 
-func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
+func ReadFileToCovMap(fName string) (map[string]map[string][]bool, CovMapProperties, error) {
 
 	f, err := os.Open(fName)
 	if err != nil {
-		return nil, err
+		return nil, CovMapProperties{}, err
 	}
 	defer f.Close()
 
@@ -98,7 +104,7 @@ func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
 			totalFiles += 1
 		} else if pieces[0] == "[FUNCTION]" {
 			if currentFile == "" {
-				return nil, errors.New("function without a file")
+				return nil, CovMapProperties{}, errors.New("function without a file")
 			}
 
 			currentFunc = pieces[1]
@@ -109,16 +115,16 @@ func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
 			totalFuncs += 1
 		} else if pieces[0] == "[BLOCK]" {
 			if currentFile == "" || currentFunc == "" {
-				return nil, errors.New("block without a function or file")
+				return nil, CovMapProperties{}, errors.New("block without a function or file")
 			}
 
 			if len(pieces) != 5 {
-				return nil, errors.New("wrong number of pieces in BLOCK line")
+				return nil, CovMapProperties{}, errors.New("wrong number of pieces in BLOCK line")
 			}
 
 			executions, err := strconv.ParseUint(pieces[4], 10, 64)
 			if err != nil {
-				return nil, err
+				return nil, CovMapProperties{}, err
 			}
 
 			totalRegions += 1
@@ -134,16 +140,22 @@ func ReadFileToCovMap(fName string) (map[string]map[string][]bool, error) {
 		}
 	}
 
-	return covMap, nil
+	props := CovMapProperties{
+		NumFiles:     totalFiles,
+		NumFunctions: totalFuncs,
+		NumRegions:   totalRegions,
+	}
+
+	return covMap, props, nil
 }
 
 // ReadCovMetadata given the text output by our custom version of llvm-cov, create a metadata object that
 // allows us to reason about the bit vectors containing the coverage data
-func ReadCovMetadata(fname string) (map[string]map[string][]CodeRegion, error) {
+func ReadCovMetadata(fname string) (map[string]map[string][]CodeRegion, CovMapProperties, error) {
 
 	f, err := os.Open(fname)
 	if err != nil {
-		return nil, err
+		return nil, CovMapProperties{}, err
 	}
 	defer f.Close()
 
@@ -152,6 +164,9 @@ func ReadCovMetadata(fname string) (map[string]map[string][]CodeRegion, error) {
 	metaMap := make(map[string]map[string][]CodeRegion)
 	currentFile := ""
 	currentFunc := ""
+	totalFiles := 0
+	totalFuncs := 0
+	totalRegions := 0
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -167,23 +182,25 @@ func ReadCovMetadata(fname string) (map[string]map[string][]CodeRegion, error) {
 			}
 			if _, ok := metaMap[currentFile]; !ok {
 				metaMap[currentFile] = make(map[string][]CodeRegion)
+				totalFiles += 1
 			}
 		} else if pieces[0] == "[FUNCTION]" {
 			if currentFile == "" {
-				return nil, errors.New("function without a file")
+				return nil, CovMapProperties{}, errors.New("function without a file")
 			}
 
 			currentFunc = pieces[1]
 			if _, ok := metaMap[currentFile][currentFunc]; !ok {
 				metaMap[currentFile][currentFunc] = make([]CodeRegion, 0)
+				totalFuncs += 1
 			}
 		} else if pieces[0] == "[BLOCK]" {
 			if currentFile == "" || currentFunc == "" {
-				return nil, errors.New("block without a function or file")
+				return nil, CovMapProperties{}, errors.New("block without a function or file")
 			}
 
 			if len(pieces) != 5 {
-				return nil, errors.New("wrong number of pieces in BLOCK line")
+				return nil, CovMapProperties{}, errors.New("wrong number of pieces in BLOCK line")
 			}
 
 			var cr CodeRegion
@@ -192,34 +209,42 @@ func ReadCovMetadata(fname string) (map[string]map[string][]CodeRegion, error) {
 
 			codeIndices := strings.Split(pieces[3], ",")
 			if len(codeIndices) != 4 {
-				return nil, errors.New("invalid line/column numbers")
+				return nil, CovMapProperties{}, errors.New("invalid line/column numbers")
 			}
 
 			cr.LineStart, err = strconv.Atoi(codeIndices[0])
 			if err != nil {
-				return nil, errors.New("invalid line/column numbers")
+				return nil, CovMapProperties{}, errors.New("invalid line/column numbers")
 			}
 
 			cr.ColumnStart, err = strconv.Atoi(codeIndices[1])
 			if err != nil {
-				return nil, errors.New("invalid line/column numbers")
+				return nil, CovMapProperties{}, errors.New("invalid line/column numbers")
 			}
 
 			cr.LineEnd, err = strconv.Atoi(codeIndices[2])
 			if err != nil {
-				return nil, errors.New("invalid line/column numbers")
+				return nil, CovMapProperties{}, errors.New("invalid line/column numbers")
 			}
 
 			cr.ColumnEnd, err = strconv.Atoi(codeIndices[3])
 			if err != nil {
-				return nil, errors.New("invalid line/column numbers")
+				return nil, CovMapProperties{}, errors.New("invalid line/column numbers")
 			}
 
 			metaMap[currentFile][currentFunc] = append(metaMap[currentFile][currentFunc], cr)
+			totalRegions += 1
 
 		}
 	}
-	return metaMap, nil
+
+	props := CovMapProperties{
+		NumFiles:     totalFiles,
+		NumFunctions: totalFuncs,
+		NumRegions:   totalRegions,
+	}
+
+	return metaMap, props, nil
 }
 
 func ConvertCovMapToStructure(covMap map[string]map[string][]bool) map[string]map[string]int {
@@ -613,6 +638,47 @@ func GetCovPathsMIDAResults(rootPath string, onePerSite bool) ([]string, error) 
 
 	for _, site := range dirs {
 		paths, err := GetCovPathsSite(path.Join(rootPath, site.Name()))
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+		if onePerSite {
+			paths = paths[len(paths)-1:]
+		}
+		results = append(results, paths...)
+	}
+	return results, nil
+}
+
+func GetPathsSite(sitePath string) ([]string, error) {
+	subDirs, err := ioutil.ReadDir(sitePath)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]string, 0)
+	for _, sd := range subDirs {
+		path.Join()
+		result = append(result, sitePath, sd.Name())
+	}
+
+	if len(result) == 0 {
+		return nil, errors.New("no valid results for site")
+	}
+
+	return result, nil
+}
+
+func GetPathsMidaResults(rootPath string, onePerSite bool) ([]string, error) {
+	results := make([]string, 0)
+
+	dirs, err := ioutil.ReadDir(rootPath)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, site := range dirs {
+		paths, err := GetPathsSite(path.Join(rootPath, site.Name()))
 		if err != nil {
 			log.Error(err)
 			continue
