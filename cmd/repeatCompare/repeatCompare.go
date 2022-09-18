@@ -52,20 +52,11 @@ var regionCoverageLock sync.Mutex
 func main() {
 	var covFile string
 	var resultsPath string
-	var outfile string
-	var crawlRegionCoverageOutfile string
-	var onePerSite bool
 
 	flag.StringVar(&covFile, "coverage-file", "coverage.txt",
 		"Path to sample text coverage file for metadata generation")
 	flag.StringVar(&resultsPath, "results-path", "results",
 		"Path to MIDA results for analysis")
-	flag.StringVar(&outfile, "region-out", "region_coverage.csv",
-		"Path to output file csv")
-	flag.StringVar(&crawlRegionCoverageOutfile, "crawl-out", "crawl_region_coverage.csv",
-		"Path to output file csv")
-	flag.BoolVar(&onePerSite, "one-per-site", false,
-		"If true, only one crawl per site will be counted")
 
 	flag.Parse()
 
@@ -125,7 +116,7 @@ func main() {
 	log.Infof("  - Total Functions: %d", functions)
 	log.Infof("  - Total Code Regions: %d\n", regions)
 
-	covPaths, err := pp.GetCovPathsMIDAResults(resultsPath, onePerSite)
+	covPaths, err := pp.GetCovPathsMIDAResults(resultsPath, false)
 	if err != nil {
 		log.Fatal(err)
 	}

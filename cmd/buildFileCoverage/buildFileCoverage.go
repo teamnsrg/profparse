@@ -62,14 +62,14 @@ func main() {
 	log.SetReportCaller(true)
 	log.Infof("Begin creating metadata structures by reading %s...", covFile)
 
-	MetaMap, err = pp.ReadCovMetadata(covFile)
+	MetaMap, _, err = pp.ReadCovMetadata(covFile)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	FileCovCounts = make(map[string]int)
 
-	sampleCovMap, err := pp.ReadFileToCovMap(covFile)
+	sampleCovMap, _, err := pp.ReadFileToCovMap(covFile)
 	if err != nil {
 		log.Fatal(err)
 	}

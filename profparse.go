@@ -658,8 +658,7 @@ func GetPathsSite(sitePath string) ([]string, error) {
 
 	result := make([]string, 0)
 	for _, sd := range subDirs {
-		path.Join()
-		result = append(result, sitePath, sd.Name())
+		result = append(result, path.Join(sitePath, sd.Name()))
 	}
 
 	if len(result) == 0 {
@@ -782,4 +781,15 @@ func LoadMidaResourceData(filename string) (map[string]b.DTResource, error) {
 	}
 
 	return resourceData, nil
+}
+
+func CountCoveredRegions(bv []bool) (int, int) {
+	total := len(bv)
+	covered := 0
+	for _, val := range bv {
+		if val {
+			covered += 1
+		}
+	}
+	return covered, total
 }

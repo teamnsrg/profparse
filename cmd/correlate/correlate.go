@@ -73,66 +73,67 @@ var SiteCats map[string]CloudflareCategoryEntry
 
 var ExcludeVector []bool
 
-//var DirectoriesOfInterest = []string{
-//	"third_party/blink",
-//	"android_webview",
-//	"apps",
-//	"ash",
-//	"base",
-//	"build",
-//	"cc",
-//	"chrome",
-//	"chromecast",
-//	"chromeos",
-//	"cloud_print",
-//	"codelabs",
-//	"components",
-//	"content",
-//	"courgette",
-//	"crypto",
-//	"dbus",
-//	"device",
-//	"docs",
-//	"extensions",
-//	"fuchsia",
-//	"gin",
-//	"google_apis",
-//	"google_update",
-//	"gpu",
-//	"headless",
-//	"infra",
-//	"ios",
-//	"ipc",
-//	"jingle",
-//	"media",
-//	"mojo",
-//	"native_client",
-//	"native_client_sdk",
-//	"net",
-//	"out",
-//	"pdf",
-//	"ppapi",
-//	"printing",
-//	"remoting",
-//	"rlz",
-//	"sandbox",
-//	"services",
-//	"skia",
-//	"sql",
-//	"storage",
-//	"styleguide",
-//	"testing",
-//	"third_party",
-//	"tools",
-//	"ui",
-//	"url",
-//	"v8",
-//	"weblayer",
-//}
-
 var DirectoriesOfInterest = []string{
+	"third_party/blink",
+	"android_webview",
+	"apps",
+	"ash",
+	"base",
+	"build",
+	"cc",
+	"chrome",
+	"chromecast",
+	"chromeos",
+	"cloud_print",
+	"codelabs",
+	"components",
+	"content",
+	"courgette",
+	"crypto",
+	"dbus",
+	"device",
+	"docs",
+	"extensions",
+	"fuchsia",
+	"gin",
+	"google_apis",
+	"google_update",
+	"gpu",
+	"headless",
+	"infra",
+	"ios",
+	"ipc",
+	"jingle",
+	"media",
+	"mojo",
+	"native_client",
+	"native_client_sdk",
+	"net",
+	"out",
+	"pdf",
+	"ppapi",
+	"printing",
+	"remoting",
+	"rlz",
+	"sandbox",
+	"services",
+	"skia",
+	"sql",
+	"storage",
+	"styleguide",
+	"testing",
+	"third_party",
+	"tools",
+	"ui",
+	"url",
+	"v8",
+	"weblayer",
 	"net/websockets",
 }
+
+//var DirectoriesOfInterest = []string{
+//	"net/websockets",
+//}
 
 func main() {
 	var covFile string
@@ -147,7 +148,7 @@ func main() {
 	flag.StringVar(&outfile, "out", "file_coverage.csv",
 		"Path to output file csv")
 	flag.StringVar(&excludeBVFile, "excludeBV", "",
-		"BV file to exlcude set regions from analysis")
+		"BV file to exclude set regions from analysis")
 
 	flag.Parse()
 
@@ -164,17 +165,22 @@ func main() {
 	log.SetReportCaller(true)
 	log.Infof("Begin creating metadata structures by reading %s...", covFile)
 
-	MetaMap, err = pp.ReadCovMetadata(covFile)
+	var metaProps pp.CovMapProperties
+	MetaMap, metaProps, err = pp.ReadCovMetadata(covFile)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	log.Infof("MetaMap Files: %d, Funcs: %d, Regions: %d", metaProps.NumFiles, metaProps.NumFunctions, metaProps.NumRegions)
 
 	FileCovCounts = make(map[string]int)
 
-	sampleCovMap, err := pp.ReadFileToCovMap(covFile)
+	sampleCovMap, props, err := pp.ReadFileToCovMap(covFile)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	log.Infof("CovMap Files: %d, Funcs: %d, Regions: %d", props.NumFiles, props.NumFunctions, props.NumRegions)
 
 	files := 0
 	functions := 0
@@ -203,23 +209,40 @@ func main() {
 		}
 	}
 	BVIndexToCodeRegionMap = pp.GenerateBVIndexToCodeRegionMap(Structure, MetaMap)
+	log.Infof("BVIndexToCodeRegionMap Length: %d", len(BVIndexToCodeRegionMap))
 
 	// Build FilenameToBVIndices Map
 	FilenameToBVIndices = make(map[string]BVRange)
 	currentIndex := 0
 	start := 0
 	end := 0
-	for k, v := range Structure {
+	totalRegions := 0
+
+	fileNames := make([]string, 0)
+	for fileName := range Structure {
+		fileNames = append(fileNames, fileName)
+	}
+	sort.Strings(fileNames)
+
+	for _, fileName := range fileNames {
 		start = currentIndex
-		for _, numBlocks := range v {
-			currentIndex += numBlocks
+		funcNames := make([]string, 0)
+		for funcName := range Structure[fileName] {
+			funcNames = append(funcNames, funcName)
+		}
+
+		for _, funcName := range funcNames {
+			currentIndex += Structure[fileName][funcName]
 		}
 		end = currentIndex
-		FilenameToBVIndices[k] = BVRange{
+		FilenameToBVIndices[fileName] = BVRange{
 			Start: start,
 			End:   end,
 		}
+		totalRegions += end - start
 	}
+
+	log.Infof("Total Files, Regions for FilenameToBVIndices: %d, %d", len(FilenameToBVIndices), totalRegions)
 
 	FileCoverage = make(map[string][]float64)
 
@@ -344,9 +367,9 @@ func worker(taskChan chan Task, resultChan chan Result, wg *sync.WaitGroup) {
 			indices := FilenameToBVIndices[fileName]
 			fileCov := 0
 			for i := indices.Start; i < indices.End; i++ {
-				//if ExcludeVector[i] {
-				//	continue
-				//}
+				if ExcludeVector[i] {
+					continue
+				}
 				for _, dir := range DirectoriesOfInterest {
 					if isDirMap[dir] {
 						totalBlocksPerDir[dir] += 1
