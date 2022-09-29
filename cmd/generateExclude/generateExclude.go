@@ -37,11 +37,11 @@ File,Function,Region Number,Functions in File,Regions in File,Regions in Functio
 var COVERED_ALWAYS_OR_NEVER_EXCLUDE = []string{
 	"output/vanilla_region_coverage.csv",
 	"output/gremlins_region_coverage.csv",
-	//	"output/headless_region_coverage.csv",
+	"output/100k_region_out.csv",
 }
 
 var COVERED_EVEN_ONCE_EXCLUDE = []string{
-	"aboutblank_region_coverage.csv",
+	"output/aboutblank_region_coverage.csv",
 }
 
 const float64EqualityThreshold = 1e-6
@@ -82,25 +82,35 @@ func main() {
 
 	alwaysSoFar := make([]bool, regions)
 	neverSoFar := make([]bool, regions)
+	coveredSoFar := make([]bool, regions)
 	for i, _ := range alwaysSoFar {
 		alwaysSoFar[i] = true
 		neverSoFar[i] = true
 	}
 
 	for _, fileName := range COVERED_ALWAYS_OR_NEVER_EXCLUDE {
-		alwaysCovered, _ := pp.CountCoveredRegions(alwaysSoFar)
-		log.Infof("Always covered: %d", alwaysCovered)
-		neverCovered, _ := pp.CountCoveredRegions(neverSoFar)
-		log.Infof("Never covered: %d", neverCovered)
-
+		log.Infof("Applying Crawl: %s", fileName)
 		alwaysSoFar, neverSoFar, err = getAlwaysAndNeverCoveredVector(alwaysSoFar, neverSoFar, fileName, regions)
 		if err != nil {
 			log.Fatal(err)
 		}
+
+		alwaysCovered, _ := pp.CountCoveredRegions(alwaysSoFar)
+		log.Infof("Always covered: %d", alwaysCovered)
+		neverCovered, _ := pp.CountCoveredRegions(neverSoFar)
+		log.Infof("Never covered: %d", neverCovered)
 	}
 
+	coveredSoFar, err = getCoveredAtLeastOnce(coveredSoFar, "output/aboutblank_region_coverage.csv", regions)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	aboutBlankCovered, _ := pp.CountCoveredRegions(coveredSoFar)
+	log.Infof("About blank crawl covered %d regions", aboutBlankCovered)
+
 	excludeVector, totalExcluded, err := pp.CombineBVs([][]bool{
-		alwaysSoFar, neverSoFar,
+		alwaysSoFar, neverSoFar, coveredSoFar,
 	})
 
 	log.Infof("Total Excluded: %d", totalExcluded)
@@ -111,8 +121,28 @@ func main() {
 	neverCovered, _ := pp.CountCoveredRegions(neverSoFar)
 	log.Infof("Never covered: %d", neverCovered)
 
+	pp.WriteFileFromBV("output/alwaysCovered.bv", alwaysSoFar)
+	pp.WriteFileFromBV("output/neverCovered.bv", neverSoFar)
+	pp.WriteFileFromBV("output/aboutBlankCovered.bv", coveredSoFar)
+
 	totalExcludedRegions, totalRegions := pp.CountCoveredRegions(excludeVector)
 	log.Infof("Excluding a total of %d out of %d regions", totalExcludedRegions, totalRegions)
+
+	log.Info("Building tree...")
+	covMap, err := pp.ConvertBoolsToCovMap(neverSoFar, Structure)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	treeSummary := pp.GetTreeSummary(covMap, -1)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = pp.WriteTreeToFile(treeSummary, "output/neverCoveredTreeSummary.csv")
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func getAlwaysAndNeverCoveredVector(alwaysSoFar []bool, neverSoFar []bool, regionCoverageFile string, numRegions int) ([]bool, []bool, error) {
@@ -159,4 +189,47 @@ func getAlwaysAndNeverCoveredVector(alwaysSoFar []bool, neverSoFar []bool, regio
 	}
 
 	return always, never, nil
+}
+
+func getCoveredAtLeastOnce(coveredSoFar []bool, regionCoverageFile string, numRegions int) ([]bool, error) {
+	f, err := os.Open(regionCoverageFile)
+	if err != nil {
+		return nil, err
+	}
+	reader := csv.NewReader(f)
+
+	header := true
+
+	covered := make([]bool, numRegions)
+
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if header {
+			header = false
+			continue
+		}
+
+		regionNumber, err := strconv.Atoi(record[2])
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		percentTimesRegionCovered, err := strconv.ParseFloat(record[11], 32)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		isCovered := !almostEqual(percentTimesRegionCovered, 0.0)
+
+		covered[regionNumber] = coveredSoFar[regionNumber] || isCovered
+	}
+
+	return covered, nil
 }

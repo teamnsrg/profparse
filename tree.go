@@ -58,27 +58,27 @@ func GetTreeSummary(covMap map[string]map[string][]bool, level int) map[string]C
 	return tree
 }
 
-//func ConvertFileCoverageToTree(fc map[string]int) map[string]int {
-//	tree := make(map[string]int)
-//	for k, v := range fc {
-//		parts := strings.Split(k, "/")
-//		if parts[0] == ".." && parts[1] == ".." {
-//			parts = parts[2:]
-//		} else if parts[0] == "gen" {
-//			parts = parts[1:]
-//		}
-//
-//		for i := 0; i < len(parts); i++ {
-//			seg := strings.Join(parts[:i+1], "/")
-//			if _, ok := tree[seg]; !ok {
-//				tree[seg] = 0
-//			}
-//			tree[seg] += v
-//		}
-//	}
-//
-//	return tree
-//}
+func ConvertFileCoverageToTree(fc map[string]CovSummary) map[string]int {
+	tree := make(map[string]int)
+	for k, v := range fc {
+		parts := strings.Split(k, "/")
+		if parts[0] == ".." && parts[1] == ".." {
+			parts = parts[2:]
+		} else if parts[0] == "gen" {
+			parts = parts[1:]
+		}
+
+		for i := 0; i < len(parts); i++ {
+			seg := strings.Join(parts[:i+1], "/")
+			if _, ok := tree[seg]; !ok {
+				tree[seg] = 0
+			}
+			tree[seg] += v.CoveredRegions
+		}
+	}
+
+	return tree
+}
 
 func WriteTreeToFile(tree map[string]CovSummary, fileName string) error {
 	f, err := os.Create(fileName)

@@ -541,6 +541,29 @@ func DiffTwoBVs(bv1 []bool, bv2 []bool) (int, error) {
 	return diff, nil
 }
 
+func DiffBVsWithExclude(bv1 []bool, bv2 []bool, excludeBV []bool) (int, int, error) {
+	if len(bv1) != len(bv2) {
+		return 0, 0, errors.New("bv lengths do not match")
+	}
+	if len(bv1) != len(excludeBV) {
+		return 0, 0, errors.New("bv lengths do not match exclude vector length")
+	}
+
+	diff := 0
+	total := 0
+	for i := range bv1 {
+		if excludeBV[i] {
+			continue
+		}
+		total += 1
+		if bv1[i] != bv2[i] {
+			diff += 1
+		}
+	}
+
+	return diff, total, nil
+}
+
 func DiffTwoCovMaps(c1 map[string]map[string][]bool, c2 map[string]map[string][]bool, filePrefix string) (CovMapDiff, error) {
 	var d CovMapDiff
 
@@ -590,6 +613,21 @@ func DiffTwoCovMaps(c1 map[string]map[string][]bool, c2 map[string]map[string][]
 	}
 
 	return d, nil
+}
+
+func GetSitePathsMidaResults(midaResultsPath string) ([]string, error) {
+	results := make([]string, 0)
+
+	dirs, err := ioutil.ReadDir(midaResultsPath)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, site := range dirs {
+		results = append(results, path.Join(midaResultsPath, site.Name()))
+	}
+
+	return results, nil
 }
 
 func GetCovPathCrawl(crawlPath string) (string, error) {
@@ -744,6 +782,37 @@ func GetMedianBV(vectors [][]bool) ([]bool, error) {
 		}
 
 		if float64(count) >= float64(len(vectors))/2.0 {
+			finalBV[i] = true
+		} else {
+			finalBV[i] = false
+		}
+	}
+
+	return finalBV, nil
+}
+
+// GetMedianBV given a vector of bit vectors, returns a single bit vector best representative of
+// that group through simple median
+func GetThresholdBV(vectors [][]bool, threshold float64) ([]bool, error) {
+	if len(vectors) <= 0 {
+		return nil, errors.New("no bit vectors passed to GetThresholdBV()")
+	}
+
+	expectedLength := len(vectors[0])
+	if expectedLength == 0 {
+		return nil, errors.New("zero length vector in GetThresholdBV()")
+	}
+
+	finalBV := make([]bool, len(vectors[0]))
+	for i := range vectors[0] {
+		count := 0
+		for j := range vectors {
+			if vectors[j][i] {
+				count += 1
+			}
+		}
+
+		if float64(count) >= float64(len(vectors))*threshold {
 			finalBV[i] = true
 		} else {
 			finalBV[i] = false

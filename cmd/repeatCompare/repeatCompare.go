@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -15,11 +16,18 @@ type Task struct {
 	Path string
 }
 
+type CoverageComparison struct {
+	CovPathOne      string
+	CovPathTwo      string
+	DomainOne       string
+	DomainTwo       string
+	RegionsCompared int
+	RegionsDiff     int
+}
+
 type Result struct {
-	Path             string
-	FilesCovered     int
-	FunctionsCovered int
-	RegionsCovered   int
+	Domain      string
+	Comparisons []CoverageComparison
 }
 
 type BVRange struct {
@@ -49,14 +57,22 @@ var FuncCovCountLock sync.Mutex
 var regionCoverage []int
 var regionCoverageLock sync.Mutex
 
+var ExcludeBV []bool
+
 func main() {
 	var covFile string
 	var resultsPath string
+	var excludeBVFile string
+	var outfile string
 
 	flag.StringVar(&covFile, "coverage-file", "coverage.txt",
 		"Path to sample text coverage file for metadata generation")
 	flag.StringVar(&resultsPath, "results-path", "results",
 		"Path to MIDA results for analysis")
+	flag.StringVar(&excludeBVFile, "exclude-bv", "",
+		"Path to exclude bit vector")
+	flag.StringVar(&outfile, "outfile", "output/same_compare.csv",
+		"Path to output file")
 
 	flag.Parse()
 
@@ -92,20 +108,12 @@ func main() {
 	}
 	BVIndexToCodeRegionMap = pp.GenerateBVIndexToCodeRegionMap(Structure, MetaMap)
 
-	// Build FilenameToBVIndices Map
-	FilenameToBVIndices = make(map[string]BVRange)
-	currentIndex := 0
-	start := 0
-	end := 0
-	for k, v := range Structure {
-		start = currentIndex
-		for _, numBlocks := range v {
-			currentIndex += numBlocks
-		}
-		end = currentIndex
-		FilenameToBVIndices[k] = BVRange{
-			Start: start,
-			End:   end,
+	if excludeBVFile == "" {
+		ExcludeBV = make([]bool, regions)
+	} else {
+		ExcludeBV, err = pp.ReadBVFileToBV(excludeBVFile)
+		if err != nil {
+			log.Fatal(err)
 		}
 	}
 
@@ -116,14 +124,11 @@ func main() {
 	log.Infof("  - Total Functions: %d", functions)
 	log.Infof("  - Total Code Regions: %d\n", regions)
 
-	covPaths, err := pp.GetCovPathsMIDAResults(resultsPath, false)
-	if err != nil {
-		log.Fatal(err)
-	}
+	sitePaths, err := pp.GetSitePathsMidaResults(resultsPath)
 
 	regionCoverage = make([]int, regions)
 
-	sort.Strings(covPaths)
+	sort.Strings(sitePaths)
 	SortedFiles = make([]string, 0)
 	for k := range Structure {
 		SortedFiles = append(SortedFiles, k)
@@ -136,7 +141,7 @@ func main() {
 	var owg sync.WaitGroup
 
 	owg.Add(1)
-	go writer(resultChan, &owg, crawlRegionCoverageOutfile)
+	go writer(resultChan, &owg, outfile)
 
 	WORKERS := 28
 	for i := 0; i < WORKERS; i++ {
@@ -144,7 +149,9 @@ func main() {
 		go worker(taskChan, resultChan, &wg)
 	}
 
-	for _, path := range covPaths {
+	log.Infof("Loading %d site paths...", len(sitePaths))
+
+	for _, path := range sitePaths {
 		var t Task
 		t.Path = path
 		taskChan <- t
@@ -155,120 +162,60 @@ func main() {
 	close(resultChan)
 	owg.Wait()
 
-	numTrials := len(covPaths)
-	log.Infof("numTrials: %s", numTrials)
+	numSites := len(sitePaths)
+	log.Infof("numSites: %s", numSites)
 
-	outfileName := outfile
-
-	log.Info("Finishing...")
-	f, err := os.Create(outfileName)
-	if err != nil {
-		log.Fatal(err)
-	}
-	writer := csv.NewWriter(f)
-	writer.Write([]string{"File", "Function", "Region Number",
-		"Functions in File", "Regions in File", "Regions in Function",
-		"Times File Covered", "Percent Times File Covered",
-		"Times Function Covered", "Percent Times Function Covered",
-		"Times Region Covered", "Percent Times Region Covered"})
-
-	curFile := ""
-	for i, val := range regionCoverage {
-		codeRegion := BVIndexToCodeRegionMap[i]
-		regionsInFile := 0
-		if codeRegion.FileName != curFile {
-			for _, v := range Structure[codeRegion.FileName] {
-				regionsInFile += v
-			}
-		}
-
-		writer.Write([]string{
-			codeRegion.FileName,
-			codeRegion.FuncName,
-			strconv.Itoa(i),
-
-			strconv.Itoa(len(Structure[codeRegion.FileName])),
-			strconv.Itoa(regionsInFile),
-			strconv.Itoa(Structure[codeRegion.FileName][codeRegion.FuncName]),
-
-			strconv.Itoa(FileCovCounts[codeRegion.FileName]),
-			strconv.FormatFloat(float64(FileCovCounts[codeRegion.FileName])/float64(numTrials), 'f', 4, 64),
-
-			strconv.Itoa(FuncCovCounts[codeRegion.FuncName]),
-			strconv.FormatFloat(float64(FuncCovCounts[codeRegion.FuncName])/float64(numTrials), 'f', 4, 64),
-
-			strconv.Itoa(val),
-			strconv.FormatFloat(float64(val)/float64(numTrials), 'f', 4, 64),
-		})
-
-	}
-
-	writer.Flush()
-	f.Close()
 	log.Info("Finished")
 }
 
 func worker(taskChan chan Task, resultsChan chan Result, wg *sync.WaitGroup) {
 	for task := range taskChan {
-		bv, err := pp.ReadBVFileToBV(task.Path)
+		covPaths, err := pp.GetCovPathsSite(task.Path)
 		if err != nil {
 			log.Error(err)
 			continue
 		}
 
-		regionsCovered := 0
+		var r Result
+		parts := strings.Split(task.Path, "/")
+		r.Domain = parts[len(parts)-1]
+		r.Comparisons = make([]CoverageComparison, 0)
 
-		// Count number of regions covered, and ensure that any covered regions are marked as such
-		currentFile := ""
-		currentFunc := ""
-		markedFileCovered := true
-		markedFunctionCovered := true
-		for i, bit := range bv {
-			codeRegion := BVIndexToCodeRegionMap[i]
-			if codeRegion.FileName != currentFile {
-				currentFile = codeRegion.FileName
-				markedFileCovered = false
+		bvMap := make(map[string][]bool)
+		for _, covPath := range covPaths {
+			bv, err := pp.ReadBVFileToBV(covPath)
+			if err != nil {
+				log.Error(err)
+				continue
 			}
 
-			if codeRegion.FuncName != currentFunc {
-				currentFunc = codeRegion.FuncName
-				markedFunctionCovered = false
-			}
+			bvMap[covPath] = bv
+		}
 
-			if bit {
-				regionsCovered++
-				regionCoverageLock.Lock()
-				regionCoverage[i] += 1
-				regionCoverageLock.Unlock()
-
-				if !markedFileCovered {
-					FileCovCountLock.Lock()
-					if _, ok := FileCovCounts[currentFile]; !ok {
-						FileCovCounts[currentFile] = 0
-					}
-					FileCovCounts[currentFile]++
-					markedFileCovered = true
-					FileCovCountLock.Unlock()
+		for covPathOne, bvOne := range bvMap {
+			for covPathTwo, bvTwo := range bvMap {
+				if covPathOne == covPathTwo {
+					continue
 				}
 
-				if !markedFunctionCovered {
-					FuncCovCountLock.Lock()
-					if _, ok := FuncCovCounts[currentFunc]; !ok {
-						FuncCovCounts[currentFunc] = 0
-					}
-					FuncCovCounts[currentFunc]++
-					markedFunctionCovered = true
-					FuncCovCountLock.Unlock()
+				diff, total, err := pp.DiffBVsWithExclude(bvOne, bvTwo, ExcludeBV)
+				if err != nil {
+					log.Error(err)
+					continue
 				}
+
+				var cc CoverageComparison
+				cc.DomainOne = r.Domain
+				cc.DomainTwo = r.Domain
+				cc.CovPathOne = covPathOne
+				cc.CovPathTwo = covPathTwo
+				cc.RegionsDiff = diff
+				cc.RegionsCompared = total
+
+				r.Comparisons = append(r.Comparisons, cc)
 			}
 		}
 
-		CompleteCounter += 1
-		log.Info(CompleteCounter)
-
-		var r Result
-		r.Path = task.Path
-		r.RegionsCovered = regionsCovered
 		resultsChan <- r
 	}
 	wg.Done()
@@ -276,23 +223,46 @@ func worker(taskChan chan Task, resultsChan chan Result, wg *sync.WaitGroup) {
 
 func writer(resultChan chan Result, wg *sync.WaitGroup, outfile string) {
 
+	log.Infof("Writing output to: %s", outfile)
 	f, err := os.Create(outfile)
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	completed := 0
+
 	writer := csv.NewWriter(f)
 	writer.Write([]string{
-		"Results Path",
-		"Regions RegionsCovered",
+		"Same or Different",
+		"Domain One",
+		"Domain Two",
+		"Path One",
+		"Path Two",
+		"Different Regions",
+		"Regions Compared",
+		"Percent Difference",
 	})
 
 	for result := range resultChan {
-		crawlPath := result.Path
-		regions := result.RegionsCovered
+		for _, comp := range result.Comparisons {
+			writer.Write([]string{
+				"Same-Gremlins",
+				comp.DomainOne,
+				comp.DomainTwo,
+				comp.CovPathOne,
+				comp.CovPathTwo,
+				strconv.Itoa(comp.RegionsDiff),
+				strconv.Itoa(comp.RegionsCompared),
+				strconv.FormatFloat(float64(comp.RegionsDiff)/float64(comp.RegionsCompared), 'f', 8, 64),
+			})
+			writer.Flush()
+		}
 
-		writer.Write([]string{crawlPath, strconv.Itoa(regions)})
-		writer.Flush()
+		completed += 1
+		log.Infof("Sites completed: %d", completed)
 	}
+
+	f.Close()
+
 	wg.Done()
 }
