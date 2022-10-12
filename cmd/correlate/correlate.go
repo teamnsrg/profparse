@@ -6,6 +6,7 @@ import (
 	"flag"
 	log "github.com/sirupsen/logrus"
 	pp "github.com/teamnsrg/profparse"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -23,10 +24,18 @@ type Result struct {
 	Path                         string // Done
 	Domain                       string // Done
 	Category                     string
-	Success                      bool             // Done
-	TotalResources               int              // Done
-	TotalBlocksCovered           int64            // Done
-	TotalResourceBytesDownloaded int64            // Done
+	Success                      bool  // Done
+	TotalResources               int   // Done
+	TotalBlocksCovered           int64 // Done
+	TotalResourceBytesDownloaded int64 // Done
+	TotalScripts                 int64
+	TotalDocuments               int64
+	TotalImages                  int64
+	TotalFonts                   int64
+	TotalStylesheets             int64
+	TotalXHRs                    int64
+	TotalOrigins                 int64
+	TotalOriginsScripts          int64
 	LoadEvent                    bool             // Done
 	LoadEventTime                float64          // Done
 	BrowserOpenTime              float64          // Done
@@ -73,63 +82,7 @@ var SiteCats map[string]CloudflareCategoryEntry
 
 var ExcludeVector []bool
 
-var DirectoriesOfInterest = []string{
-	"third_party/blink",
-	"android_webview",
-	"apps",
-	"ash",
-	"base",
-	"build",
-	"cc",
-	"chrome",
-	"chromecast",
-	"chromeos",
-	"cloud_print",
-	"codelabs",
-	"components",
-	"content",
-	"courgette",
-	"crypto",
-	"dbus",
-	"device",
-	"docs",
-	"extensions",
-	"fuchsia",
-	"gin",
-	"google_apis",
-	"google_update",
-	"gpu",
-	"headless",
-	"infra",
-	"ios",
-	"ipc",
-	"jingle",
-	"media",
-	"mojo",
-	"native_client",
-	"native_client_sdk",
-	"net",
-	"out",
-	"pdf",
-	"ppapi",
-	"printing",
-	"remoting",
-	"rlz",
-	"sandbox",
-	"services",
-	"skia",
-	"sql",
-	"storage",
-	"styleguide",
-	"testing",
-	"third_party",
-	"tools",
-	"ui",
-	"url",
-	"v8",
-	"weblayer",
-	"net/websockets",
-}
+var DirectoriesOfInterest = []string{}
 
 //var DirectoriesOfInterest = []string{
 //	"net/websockets",
@@ -321,6 +274,8 @@ func worker(taskChan chan Task, resultChan chan Result, wg *sync.WaitGroup) {
 			continue
 		}
 
+		var r Result
+
 		browserOpenedTime := metadata.TaskTiming.BrowserOpen
 
 		loadEventTime := metadata.TaskTiming.LoadEvent
@@ -338,6 +293,58 @@ func worker(taskChan chan Task, resultChan chan Result, wg *sync.WaitGroup) {
 		if len(resourceData) < 0 {
 			continue
 		}
+
+		var scripts int64 = 0
+		var fonts int64 = 0
+		var documents int64 = 0
+		var images int64 = 0
+		var stylesheets int64 = 0
+		var xhrs int64 = 0
+		var others int64 = 0
+
+		originsAll := make(map[string]bool)
+		originsScripts := make(map[string]bool)
+		for _, entry := range resourceData {
+			if len(entry.Requests) == 0 || entry.Response == nil {
+				continue
+			}
+
+			if entry.Response.Type.String() == "Script" {
+				scripts += 1
+			} else if entry.Response.Type.String() == "Document" {
+				documents += 1
+			} else if entry.Response.Type.String() == "XHR" {
+				xhrs += 1
+			} else if entry.Response.Type.String() == "Image" {
+				images += 1
+			} else if entry.Response.Type.String() == "Stylesheet" {
+				stylesheets += 1
+			} else if entry.Response.Type.String() == "Font" {
+				fonts += 1
+			} else if entry.Response.Type.String() == "Other" {
+				others += 1
+			}
+
+			url, err := url.Parse(entry.Response.Response.URL)
+			if err != nil {
+				continue
+			}
+
+			originsAll[url.Host] = true
+			if entry.Response.Type.String() == "Script" {
+				originsScripts[url.Host] = true
+			}
+		}
+
+		r.TotalDocuments = documents
+		r.TotalScripts = scripts
+		r.TotalImages = images
+		r.TotalStylesheets = stylesheets
+		r.TotalFonts = fonts
+		r.TotalXHRs = xhrs
+
+		r.TotalOrigins = int64(len(originsAll))
+		r.TotalOriginsScripts = int64(len(originsScripts))
 
 		var blocksCovered int64 = 0
 		var genBlocksCovered int64 = 0
@@ -406,7 +413,6 @@ func worker(taskChan chan Task, resultChan chan Result, wg *sync.WaitGroup) {
 			log.Error(err)
 		}
 
-		var r Result
 		r.Path = task.Path
 		r.Domain = domain
 		r.Success = metadata.Success
@@ -468,6 +474,14 @@ func writer(resultChan chan Result, wwg *sync.WaitGroup, outfile string) {
 		"Browser Open Time",
 		"Total Resources",
 		"Total Resource Bytes",
+		"Total Documents",
+		"Total Scripts",
+		"Total Images",
+		"Total Stylesheets",
+		"Total Fonts",
+		"Total XHRs",
+		"Total Origins",
+		"Total Script Origins",
 		"Total Blocks Covered",
 		"Gen Blocks Covered",
 		"Src Blocks Covered",
@@ -491,6 +505,14 @@ func writer(resultChan chan Result, wwg *sync.WaitGroup, outfile string) {
 			strconv.FormatFloat(result.BrowserOpenTime, 'f', 2, 64),
 			strconv.Itoa(result.TotalResources),
 			strconv.FormatInt(result.TotalResourceBytesDownloaded, 10),
+			strconv.FormatInt(result.TotalDocuments, 10),
+			strconv.FormatInt(result.TotalScripts, 10),
+			strconv.FormatInt(result.TotalImages, 10),
+			strconv.FormatInt(result.TotalStylesheets, 10),
+			strconv.FormatInt(result.TotalFonts, 10),
+			strconv.FormatInt(result.TotalXHRs, 10),
+			strconv.FormatInt(result.TotalOrigins, 10),
+			strconv.FormatInt(result.TotalOriginsScripts, 10),
 			strconv.FormatInt(result.TotalBlocksCovered, 10),
 			strconv.FormatInt(result.GenBlocksCovered, 10),
 			strconv.FormatInt(result.SrcBlocksCovered, 10),

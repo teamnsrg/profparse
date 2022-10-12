@@ -61,24 +61,29 @@ func main() {
 	var positiveSiteDirectories = []string{
 		//"/data3/nsrg/mida_results/fingerprinting/browserleaks.com-canvas",
 		"/data3/nsrg/mida_results/fingerprinting/amiunique.org-fp",
-		"/data3/nsrg/mida_results/1m-4k-2022-3x-vanilla/walmart.com",
-		"/data3/nsrg/mida_results/1m-4k-2022-3x-vanilla/vmware.com",
-		"/data3/nsrg/mida_results/VVNN-100k/3m.com",
-		"/data3/nsrg/mida_results/1m-4k-2022-3x-vanilla/autodesk.com",
+		"/data3/nsrg/mida_results/VVNN-100k/walmart.com",
+		"/data3/nsrg/mida_results/VVNN-100k/vmware.com",
+		//"/data3/nsrg/mida_results/VVNN-100k/3m.com",
+		//"/data3/nsrg/mida_results/VVNN-100k/earthlink.net",
+		//"/data3/nsrg/mida_results/VVNN-100k/pebblebeach.com",
+		//"/data3/nsrg/mida_results/VVNN-100k/autodesk.com",
+		//"/data3/nsrg/mida_results/VVNN-100k/life.edu",
+		//"/data3/nsrg/mida_results/VVNN-100k/humanism.org.uk",
 	}
 
 	var negativeSiteDirectories = []string{
-		"/data3/nsrg/mida_results/fingerprinting/browserleaks.com",
+		//"/data3/nsrg/mida_results/fingerprinting/browserleaks.com",
 		//"/data3/nsrg/mida_results/fingerprinting/browserleaks.com-webrtc",
 		//"/data3/nsrg/mida_results/fingerprinting/browserleaks.com-webgl",
 		//"/data3/nsrg/mida_results/fingerprinting/browserleaks.com-fonts",
 		"/data3/nsrg/mida_results/fingerprinting/amiunique.org",
 		"/data3/nsrg/mida_results/fingerprinting/amiunique.org-faq",
 		"/data3/nsrg/mida_results/canvas/www.w3schools.com-html-html5_canvas.asp",
-		"/data3/nsrg/mida_results/1m-4k-2022-3x-vanilla/harvard.edu",
-		"/data3/nsrg/mida_results/1m-4k-2022-3x-vanilla/illinois.edu",
+		//"/data3/nsrg/mida_results/1m-4k-2022-3x-vanilla/harvard.edu",
 		"/data3/nsrg/mida_results/1m-4k-2022-3x-vanilla/mozilla.org",
-		"/data3/nsrg/mida_results/1m-4k-2022-3x-vanilla/state.gov",
+		"/data3/nsrg/mida_results/1m-4k-2022-3x-vanilla/apple.com",
+		"/data3/nsrg/mida_results/1m-4k-2022-3x-vanilla/eff.org",
+		//"/data3/nsrg/mida_results/1m-4k-2022-3x-vanilla/state.gov",
 	}
 
 	var err error
@@ -205,7 +210,7 @@ func main() {
 		bvs = append(bvs, bv)
 	}
 
-	medianBV, err := pp.GetThresholdBV(bvs, 0.85)
+	medianBV, err := pp.GetThresholdBV(bvs, 0.99)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -240,6 +245,7 @@ func main() {
 
 	compareMaskExclude := make([]bool, len(medianBV))
 	comparedRegions := 0
+	comparedBV := make([]bool, len(medianBV))
 	for i := range medianBV {
 		if excludeBV[i] {
 			compareMaskExclude[i] = true
@@ -249,6 +255,7 @@ func main() {
 			compareMaskExclude[i] = true
 		} else {
 			comparedRegions += 1
+			comparedBV[i] = true
 		}
 	}
 	log.Infof("Compared Regions: %d", comparedRegions)
@@ -258,6 +265,11 @@ func main() {
 		log.Error(err)
 	}
 	err = pp.WriteFileFromBV(path.Join(outfiledir, "compareMaskCovered.bv"), medianBV)
+	if err != nil {
+		log.Error(err)
+	}
+
+	err = pp.GenerateRegionFile(comparedBV, "output/comparedBVFiles.csv", BVIndexToCodeRegionMap)
 	if err != nil {
 		log.Error(err)
 	}
